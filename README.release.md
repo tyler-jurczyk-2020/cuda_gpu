@@ -24,42 +24,48 @@ Users are required to either use a Personal Access Token (PAT) or SSH key for Gi
 
 In a Delta terminal, navigate to the location where you would like to keep your files for ECE 408, most likelly in your home directory. Run the following to clone your repository:
 
-`git clone git@github.com:illinois-cs-coursework/sp24_ece408_NETID ece408git` where NETID is your UIUC NetID.
+  `git clone git@github.com:illinois-cs-coursework/sp24_ece408_NETID ece408git` where NETID is your UIUC NetID.
 
 You will be prompted to enter your username and password. Enter your Github username enter your Personal Access Token instead of your password.  This will clone the remote repository to "ece408git" on your computer where you will be able to retrieve/submit/work on assignments.
 
 And finally add release repository so you can receive class assignments: 
 
-`cd ece408git`
+  `cd ece408git`
 
-`git remote add release https://github.com/illinois-cs-coursework/sp24_ece408_.release.git`
+  `git remote add release https://github.com/illinois-cs-coursework/sp24_ece408_.release.git`
 
 You can run `git remote -v` to verify that the repository was added. 
 
 Also, make sure to configure your repository. This is needed by the auto-grader to pull the correct versions of your submission, otherwise we may not know whose work we are grading: 
 
-`git config user.name "Your Name"`
+  `git config user.name "Your Name"`
 
-`git config user.email "NetID@illinois.edu"`
+  `git config user.email "NetID@illinois.edu"`
 
 ### Adding libWB library to your repository ###
 
 Our lab assignments rely on a special library, called libWB, for testing your code. Therefore, you need to install this library into your repository folder so it can be found by the compiler when compiling your code.
 
-First, go to your ece408git folder: `cd; cd ece408git` 
+First, go to your ece408git folder: 
 
-Next, clone libWB library: `git clone https://github.com/abduld/libwb.git`. 
+  `cd; cd ece408git` 
 
-And then compile it: `cd libwb; make; cd ..`
+Next, clone libWB library: 
+
+  `git clone https://github.com/abduld/libwb.git`. 
+
+And then compile it: 
+
+  `cd libwb; make; cd ..`
 
 ### Retrieving Assignments ###
 
 To retrieve (or update) released assignments, go to your ece408git folder and run the following:
 
-`git fetch release`
+  `git fetch release`
 
-`git merge release/main -m "<some comment>" --allow-unrelated-histories`
+  `git merge release/main -m "some comment" --allow-unrelated-histories`
 
-`git push origin main`
+  `git push origin main`
 
-where "<some comment>" is a comment for your submission. The last command pushes the newly merged files to your remote repository. If something ever happens to your repository and you need to go back in time, you will be able to revert your repository to when you first retrieved an assignment.
+where "some comment" is a comment for your submission. The last command pushes the newly merged files to your remote repository. If something ever happens to your repository and you need to go back in time, you will be able to revert your repository to when you first retrieved an assignment.
