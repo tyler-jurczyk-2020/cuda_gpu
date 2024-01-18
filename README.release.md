@@ -6,15 +6,14 @@ We will be using NCSA's Delta system for all programming assignments in this cou
 
 For those opting for connect with VSCode Remote - SSH extension, setup instructions to connect to DELTA are available at this link: https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/prog_env.html#remote-ssh.
 
-  ** Tips for VSCode: After entering your password for the first time, click on the blue details in the lower right corner to start Duo two-factor login. **
-
-  <img width="340" alt="image" src="https://github.com/ECE-408-Course/ECE408SP24/assets/52022161/37ff36a3-e25f-4089-b6ae-4ded70daac72">
+  **Tips for VSCode: After entering your password for the first time, click on the blue (details) in the lower right corner to start Duo two-factor login.**
   
 ## Getting started with the course repository
 
 These instructions imply that you have obtained an account on Delta and are attempting to work on the course materials on Delta's login node. In other words, this repository is to be cloned on Delta, not on your personal computer or some other lab workstation.
 
 ### Creating the GitHub repository
+
 First, follow this link to establish a class repository: https://edu.cs.illinois.edu/create-gh-repo/sp24_ece408. This needs to be done only once. After this step is complete, you should be able to visit https://github.com/illinois-cs-coursework/sp24_ece408_NetID page (where NetID is your NetID) that shows the contents of your repository. Initially, this repository will be empty; it will be populated soon.
 
 ### Creating a PAT (Personal Access Token)
@@ -32,6 +31,7 @@ You will be prompted to enter your username and password. Enter your Github user
 And finally add release repository so you can receive class assignments: 
 
 `cd ece408git`
+
 `git remote add release https://github.com/illinois-cs-coursework/sp24_ece408_.release.git`
 
 You can run `git remote -v` to verify that the repository was added. 
@@ -39,6 +39,7 @@ You can run `git remote -v` to verify that the repository was added.
 Also, make sure to configure your repository. This is needed by the auto-grader to pull the correct versions of your submission, otherwise we may not know whose work we are grading: 
 
 `git config user.name "Your Name"`
+
 `git config user.email "NetID@illinois.edu"`
 
 ### Adding libWB library to your repository ###
@@ -56,7 +57,9 @@ And then compile it: `cd libwb; make; cd ..`
 To retrieve (or update) released assignments, go to your ece408git folder and run the following:
 
 `git fetch release`
+
 `git merge release/main -m "<some comment>" --allow-unrelated-histories`
+
 `git push origin main`
 
 where "<some comment>" is a comment for your submission. The last command pushes the newly merged files to your remote repository. If something ever happens to your repository and you need to go back in time, you will be able to revert your repository to when you first retrieved an assignment.
