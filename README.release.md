@@ -6,7 +6,7 @@ We will be using NCSA's Delta system for all programming assignments in this cou
 
 For those opting for connect with VSCode Remote - SSH extension, setup instructions to connect to DELTA are available at this link: https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/prog_env.html#remote-ssh.
 
-  **Tips for VSCode: After entering your password for the first time, click on the blue details in the lower right corner to start Duo two-factor login.**
+  ** Tips for VSCode: After entering your password for the first time, click on the blue details in the lower right corner to start Duo two-factor login. **
 
   <img width="340" alt="image" src="https://github.com/ECE-408-Course/ECE408SP24/assets/52022161/37ff36a3-e25f-4089-b6ae-4ded70daac72">
   
@@ -14,14 +14,14 @@ For those opting for connect with VSCode Remote - SSH extension, setup instructi
 
 These instructions imply that you have obtained an account on Delta and are attempting to work on the course materials on Delta's login node. In other words, this repository is to be cloned on Delta, not on your personal computer or some other lab workstation.
 
-### Creating the GitHub repository ###
+### Creating the GitHub repository
 First, follow this link to establish a class repository: https://edu.cs.illinois.edu/create-gh-repo/sp24_ece408. This needs to be done only once. After this step is complete, you should be able to visit https://github.com/illinois-cs-coursework/sp24_ece408_NetID page (where NetID is your NetID) that shows the contents of your repository. Initially, this repository will be empty; it will be populated soon.
 
-### Creating a PAT (Personal Access Token) ###
+### Creating a PAT (Personal Access Token)
 
-Users are required to either use a Personal Access Token (PAT) or SSH key for Github repositories. In order to generate a token, go to your Github settings at https://github.com/settings/tokens page and click "Generate new token" link. You will need to generate a classic PAT. Give it a meaningfull name/note and set the expiration date to be 2-3 weeks past the end of the semester. Check the "repo" box under the "select scopes" menu, and create the token. The token is the string that begins with ghp_ - copy it immediately as you will need it throughout the semester. If you accidentally leave the page without copying the token, delete the token and create a new one. Next, click the Configure SSO dropdown menu, and click the Authorize button next to illinois-cs-coursework to allow you to use your token on UIUC repositories.
+Users are required to either use a Personal Access Token (PAT) or SSH key for Github repositories. In order to generate a token, go to your Github settings at https://github.com/settings/tokens page and click "Generate new token" link. You will need to generate a classic PAT. Give it a meaningful name/note and set the expiration date to be 2-3 weeks past the end of the semester. Check the "repo" box under the "select scopes" menu and create the token. The token is the string that begins with ghp_ - copy it immediately as you will need it throughout the semester. If you accidentally leave the page without copying the token, delete the token and create a new one. Next, click the Configure SSO dropdown menu, and click the Authorize button next to illinois-cs-coursework to allow you to use your token on UIUC repositories.
 
-### Clonning the Repository ###
+### Clonning the Repository
 
 In a Delta terminal, navigate to the location where you would like to keep your files for ECE 408, most likelly in your home directory. Run the following to clone your repository:
 
@@ -60,4 +60,3 @@ To retrieve (or update) released assignments, go to your ece408git folder and ru
 `git push origin main`
 
 where "<some comment>" is a comment for your submission. The last command pushes the newly merged files to your remote repository. If something ever happens to your repository and you need to go back in time, you will be able to revert your repository to when you first retrieved an assignment.
-
