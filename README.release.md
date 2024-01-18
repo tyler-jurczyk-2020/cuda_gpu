@@ -20,7 +20,7 @@ First, follow this link to establish a class repository: https://edu.cs.illinois
 
 Users are required to either use a Personal Access Token (PAT) or SSH key for Github repositories. In order to generate a token, go to your Github settings at https://github.com/settings/tokens page and click "Generate new token" link. You will need to generate a classic PAT. Give it a meaningful name/note and set the expiration date to be 2-3 weeks past the end of the semester. Check the "repo" box under the "select scopes" menu and create the token. The token is the string that begins with ghp_ - copy it immediately as you will need it throughout the semester. If you accidentally leave the page without copying the token, delete the token and create a new one. Next, click the Configure SSO dropdown menu, and click the Authorize button next to illinois-cs-coursework to allow you to use your token on UIUC repositories.
 
-### Clonning the Repository
+### Cloning the Repository
 
 In a Delta terminal, navigate to the location where you would like to keep your files for ECE 408, most likelly in your home directory. Run the following to clone your repository:
 
@@ -52,7 +52,7 @@ First, go to your ece408git folder:
 
 Next, clone libWB library: 
 
-  `git clone https://github.com/abduld/libwb.git`. 
+  `git clone https://github.com/abduld/libwb.git`
 
 And then compile it: 
 
