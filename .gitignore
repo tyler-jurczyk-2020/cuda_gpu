@@ -4,3 +4,4 @@ libwb
 !**/*.*
 *.out
 *.o
+!**/Makefile
