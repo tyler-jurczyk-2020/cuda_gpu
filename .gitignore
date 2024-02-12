@@ -5,3 +5,5 @@ libwb
 *.out
 *.o
 !**/Makefile
+compile_flags.txt
+**/*.err
