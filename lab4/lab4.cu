@@ -11,7 +11,7 @@
   } while (0)
 
 //@@ Define any useful program-wide constants here
-#define TILE_WIDTH 16
+#define TILE_WIDTH 8
 #define KERNEL_RADIUS 1
 #define KERNEL_DIM 3
 
@@ -29,17 +29,20 @@ __global__ void conv3d(float *input, float *output, const int z_size,
    int col_i = col_o - KERNEL_RADIUS;
    int depth_i = depth_o - KERNEL_RADIUS;
 
+   int input_loc = (depth_i * x_size * y_size) + (row_i * x_size) + col_i;
+   int output_loc = (depth_o * x_size * y_size) + (row_o * x_size) + col_o;
+
    if(row_i >= 0 && row_i < y_size && 
    col_i >= 0 && col_i < x_size &&
    depth_i >= 0 && depth_i < z_size) {
-       T[col_i][row_i][depth_i] = input[row_i * x_size + depth_i * z_size + col_i]; //May be incorrect indexing
+       T[depth_i][col_i][row_i] = input[input_loc];
    }
    else {
-       T[col_i][row_i][depth_i] = 0;
+       T[depth_i][col_i][row_i] = 0;
     }
     __syncthreads();
 
-    float cell = 0;
+   float pcell = 0;
 
     if(threadIdx.y < TILE_WIDTH &&
        threadIdx.x < TILE_WIDTH &&
@@ -47,11 +50,18 @@ __global__ void conv3d(float *input, float *output, const int z_size,
        for(int i = 0; i < KERNEL_DIM; i++) {
            for(int j = 0; j < KERNEL_DIM; j++) {
                for(int k = 0; k < KERNEL_DIM; k++) {
-                    cell += deviceMask[i * KERNEL_DIM + j * KERNEL_DIM] * T[threadIdx.y + i][threadIdx.x + j][threadIdx.z + k];
+                   int mask_loc = (k * KERNEL_DIM * KERNEL_DIM) + (i * KERNEL_DIM) + j;
+                   float kernelMask = T[threadIdx.z + k][threadIdx.x + j][threadIdx.y + i];
+                   pcell += deviceMask[mask_loc] * kernelMask;
                }
            }
        }  
-       output[row_i * x_size + depth_i * z_size + col_i] = cell;
+    }
+
+    if(row_o < y_size &&
+       col_o < x_size &&
+       depth_o < z_size) {
+        output[output_loc] = pcell;
     }
 }
 
@@ -99,13 +109,12 @@ int main(int argc, char *argv[]) {
   // Recall that the first three elements of hostInput are dimensions and
   // do
   // not need to be copied to the gpu
-  cudaMemcpy(deviceInput, hostInput, size_3d, cudaMemcpyHostToDevice);
-  cudaMemcpyToSymbol(deviceMask, hostKernel, kernelSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(deviceInput, hostInput + 3, size_3d, cudaMemcpyHostToDevice);
+  cudaMemcpyToSymbol(deviceMask, hostKernel, kernelSize);
 
   //@@ Initialize grid and block dimensions here
   dim3 gridDim(ceil(x_size/(1.0f * TILE_WIDTH)), ceil(y_size/(1.0f * TILE_WIDTH)), ceil(z_size/(1.0f * TILE_WIDTH)));
-  dim3 blockDim(TILE_WIDTH, TILE_WIDTH, TILE_WIDTH);
-
+  dim3 blockDim(TILE_WIDTH + 2*KERNEL_RADIUS, TILE_WIDTH + 2*KERNEL_RADIUS, TILE_WIDTH + 2*KERNEL_RADIUS);
   //@@ Launch the GPU kernel here
   conv3d<<<gridDim, blockDim>>>(deviceInput, deviceOutput, z_size, y_size, x_size);
 
@@ -121,7 +130,12 @@ int main(int argc, char *argv[]) {
   hostOutput[1] = y_size;
   hostOutput[2] = x_size;
   wbSolution(args, hostOutput, inputLength);
-
+  
+  // Debug solutions
+  for(int i = 0; i < inputLength; i++) {
+    wbLog(TRACE, hostOutput[i]);
+  }
+  
   //@@ Free device memory
   cudaFree(deviceInput);
   cudaFree(deviceMask);
