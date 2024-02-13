@@ -11,12 +11,48 @@
   } while (0)
 
 //@@ Define any useful program-wide constants here
+#define TILE_WIDTH 16
+#define KERNEL_RADIUS 1
+#define KERNEL_DIM 3
 
 //@@ Define constant memory for device kernel here
+__constant__ float deviceMask[KERNEL_DIM * KERNEL_DIM * KERNEL_DIM]; // Constant memory
 
 __global__ void conv3d(float *input, float *output, const int z_size,
                        const int y_size, const int x_size) {
   //@@ Insert kernel code here
+   __shared__ float T[TILE_WIDTH + 2*KERNEL_RADIUS][TILE_WIDTH + 2*KERNEL_RADIUS][TILE_WIDTH + 2*KERNEL_RADIUS];
+   int row_o = blockIdx.y * TILE_WIDTH + threadIdx.y;
+   int col_o = blockIdx.x * TILE_WIDTH + threadIdx.x;
+   int depth_o = blockIdx.z * TILE_WIDTH + threadIdx.z;
+   int row_i = row_o - KERNEL_RADIUS;
+   int col_i = col_o - KERNEL_RADIUS;
+   int depth_i = depth_o - KERNEL_RADIUS;
+
+   if(row_i >= 0 && row_i < y_size && 
+   col_i >= 0 && col_i < x_size &&
+   depth_i >= 0 && depth_i < z_size) {
+       T[col_i][row_i][depth_i] = input[row_i * x_size + depth_i * z_size + col_i]; //May be incorrect indexing
+   }
+   else {
+       T[col_i][row_i][depth_i] = 0;
+    }
+    __syncthreads();
+
+    float cell = 0;
+
+    if(threadIdx.y < TILE_WIDTH &&
+       threadIdx.x < TILE_WIDTH &&
+       threadIdx.z < TILE_WIDTH) {
+       for(int i = 0; i < KERNEL_DIM; i++) {
+           for(int j = 0; j < KERNEL_DIM; j++) {
+               for(int k = 0; k < KERNEL_DIM; k++) {
+                    cell += deviceMask[i * KERNEL_DIM + j * KERNEL_DIM] * T[threadIdx.y + i][threadIdx.x + j][threadIdx.z + k];
+               }
+           }
+       }  
+       output[row_i * x_size + depth_i * z_size + col_i] = cell;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -50,30 +86,35 @@ int main(int argc, char *argv[]) {
   //@@ Allocate GPU memory here
   // Recall that inputLength is 3 elements longer than the input data
   // because the first  three elements were the dimensions
+  size_t size_3d = (inputLength - 3) * sizeof(float);
+  size_t kernelSize = kernelLength * sizeof(float);
 
+  float *deviceInput;
+  float *deviceOutput;
 
+  cudaMalloc(&deviceInput, size_3d);
+  cudaMalloc(&deviceOutput, size_3d);
 
   //@@ Copy input and kernel to GPU here
   // Recall that the first three elements of hostInput are dimensions and
   // do
   // not need to be copied to the gpu
-
-
+  cudaMemcpy(deviceInput, hostInput, size_3d, cudaMemcpyHostToDevice);
+  cudaMemcpyToSymbol(deviceMask, hostKernel, kernelSize, cudaMemcpyHostToDevice);
 
   //@@ Initialize grid and block dimensions here
+  dim3 gridDim(ceil(x_size/(1.0f * TILE_WIDTH)), ceil(y_size/(1.0f * TILE_WIDTH)), ceil(z_size/(1.0f * TILE_WIDTH)));
+  dim3 blockDim(TILE_WIDTH, TILE_WIDTH, TILE_WIDTH);
 
   //@@ Launch the GPU kernel here
+  conv3d<<<gridDim, blockDim>>>(deviceInput, deviceOutput, z_size, y_size, x_size);
 
   cudaDeviceSynchronize();
-
-
 
   //@@ Copy the device memory back to the host here
   // Recall that the first three elements of the output are the dimensions
   // and should not be set here (they are set below)
-
-
-
+  cudaMemcpy(hostOutput + 3, deviceOutput, size_3d, cudaMemcpyDeviceToHost);
 
   // Set the output dimensions for correctness checking
   hostOutput[0] = z_size;
@@ -82,7 +123,9 @@ int main(int argc, char *argv[]) {
   wbSolution(args, hostOutput, inputLength);
 
   //@@ Free device memory
-
+  cudaFree(deviceInput);
+  cudaFree(deviceMask);
+  cudaFree(deviceOutput);
 
   // Free host memory
   free(hostInput);
