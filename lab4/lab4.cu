@@ -35,10 +35,10 @@ __global__ void conv3d(float *input, float *output, const int z_size,
    if(row_i >= 0 && row_i < y_size && 
    col_i >= 0 && col_i < x_size &&
    depth_i >= 0 && depth_i < z_size) {
-       T[depth_i][col_i][row_i] = input[input_loc];
+       T[threadIdx.z][threadIdx.x][threadIdx.y] = input[input_loc];
    }
    else {
-       T[depth_i][col_i][row_i] = 0;
+       T[threadIdx.z][threadIdx.x][threadIdx.y] = 0;
     }
     __syncthreads();
 
