@@ -16,7 +16,7 @@
 #define KERNEL_DIM 3
 
 //@@ Define constant memory for device kernel here
-__constant__ float deviceMask[KERNEL_DIM * KERNEL_DIM * KERNEL_DIM]; // Constant memory
+__constant__ float deviceMask[KERNEL_DIM][KERNEL_DIM][KERNEL_DIM]; // Constant memory
 
 __global__ void conv3d(float *input, float *output, const int z_size,
                        const int y_size, const int x_size) {
@@ -35,33 +35,31 @@ __global__ void conv3d(float *input, float *output, const int z_size,
    if(row_i >= 0 && row_i < y_size && 
    col_i >= 0 && col_i < x_size &&
    depth_i >= 0 && depth_i < z_size) {
-       T[threadIdx.z][threadIdx.x][threadIdx.y] = input[input_loc];
+       T[threadIdx.z][threadIdx.y][threadIdx.x] = input[input_loc];
    }
    else {
-       T[threadIdx.z][threadIdx.x][threadIdx.y] = 0;
+       T[threadIdx.z][threadIdx.y][threadIdx.x] = 0;
     }
     __syncthreads();
-
+   
    float pcell = 0;
 
     if(threadIdx.y < TILE_WIDTH &&
        threadIdx.x < TILE_WIDTH &&
        threadIdx.z < TILE_WIDTH) {
-       for(int i = 0; i < KERNEL_DIM; i++) {
-           for(int j = 0; j < KERNEL_DIM; j++) {
-               for(int k = 0; k < KERNEL_DIM; k++) {
-                   int mask_loc = (k * KERNEL_DIM * KERNEL_DIM) + (i * KERNEL_DIM) + j;
-                   float kernelMask = T[threadIdx.z + k][threadIdx.x + j][threadIdx.y + i];
-                   pcell += deviceMask[mask_loc] * kernelMask;
+       for(int k = 0; k < KERNEL_DIM; k++) {
+           for(int i = 0; i < KERNEL_DIM; i++) {
+                for(int j = 0; j < KERNEL_DIM; j++) {
+                   float kernelMask = T[threadIdx.z + k][threadIdx.y + i][threadIdx.x + j];
+                   pcell += deviceMask[k][i][j] * kernelMask;
                }
            }
        }  
-    }
-
-    if(row_o < y_size &&
-       col_o < x_size &&
-       depth_o < z_size) {
-        output[output_loc] = pcell;
+        if(row_o < y_size &&
+           col_o < x_size &&
+           depth_o < z_size) {
+            output[output_loc] = pcell;
+        }
     }
 }
 
@@ -130,11 +128,6 @@ int main(int argc, char *argv[]) {
   hostOutput[1] = y_size;
   hostOutput[2] = x_size;
   wbSolution(args, hostOutput, inputLength);
-  
-  // Debug solutions
-  for(int i = 0; i < inputLength; i++) {
-    wbLog(TRACE, hostOutput[i]);
-  }
   
   //@@ Free device memory
   cudaFree(deviceInput);
