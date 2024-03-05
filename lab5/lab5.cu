@@ -20,6 +20,18 @@ __global__ void total(float *input, float *output, int len) {
   //@@ Load a segment of the input vector into shared memory
   //@@ Traverse the reduction tree
   //@@ Write the computed sum of the block to the output vector at the correct index
+  __shared__ float partialSum[2*BLOCK_SIZE];
+
+  unsigned int t = threadIdx.x;
+  unsigned int start = 2*blockIdx.x*blockDim.x;
+  partialSum[t] = input[start + t];
+  partialSum[blockDim.x + t] = input[start + blockDim.x + t];
+  for(unsigned int stride = blockDim.x; stride >= 1; stride /=2) {
+    __syncthreads();
+    if(t < stride)
+      partialSum[t] += partialSum[t + stride];
+  }
+  output[blockIdx.x] = partialSum[0];
 }
 
 int main(int argc, char **argv) {
@@ -28,6 +40,8 @@ int main(int argc, char **argv) {
   float *hostInput;  // The input 1D list
   float *hostOutput; // The output list
   //@@ Initialize device input and output pointers
+  float *deviceInput;
+  float *deviceOutput;
 
   int numInputElements;  // number of elements in the input list
   int numOutputElements; // number of elements in the output list
@@ -46,22 +60,26 @@ int main(int argc, char **argv) {
 
   // The number of input elements in the input is numInputElements
   // The number of output elements in the input is numOutputElements
+  size_t inputSize = numInputElements * sizeof(float);
+  size_t outputSize = numOutputElements * sizeof(float);
 
   //@@ Allocate GPU memory
-
+  cudaMalloc(&deviceInput, inputSize);
+  cudaMalloc(&deviceOutput, outputSize);
 
   //@@ Copy input memory to the GPU
-
+  cudaMemcpy(deviceInput, hostInput, inputSize, cudaMemcpyHostToDevice);
 
   //@@ Initialize the grid and block dimensions here
-
+  dim3 gridDim(ceil((1.0f*numInputElements)/(2*BLOCK_SIZE)), 1, 1);
+  dim3 blockDim(BLOCK_SIZE, 1, 1);
 
   //@@ Launch the GPU Kernel and perform CUDA computation
-
+  total<<<gridDim, blockDim>>>(deviceInput, deviceOutput, numInputElements);  
   
   cudaDeviceSynchronize();  
   //@@ Copy the GPU output memory back to the CPU
-
+  cudaMemcpy(hostOutput, deviceOutput, outputSize, cudaMemcpyDeviceToHost);
   
   /********************************************************************
    * Reduce output vector on the host
@@ -74,8 +92,8 @@ int main(int argc, char **argv) {
   }
 
   //@@ Free the GPU memory
-
-
+  cudaFree(deviceInput);
+  cudaFree(deviceOutput);
 
   wbSolution(args, hostOutput, 1);
 
