@@ -27,10 +27,12 @@ You will be working on this project individually. We will release the code for p
 ## Table of Contents
 
 * [Milestone 1: Project Setup, CPU Convolution, Profiling](#milestone-1-project-setup-cpu-convolution-profiling)
+* [Milestone 2: Baseline Convolutional Kernel](#milestone-2-baseline-convolutional-kernel)
 * [Rubric](#rubric)
 * [Appendix](#appendix)
 
 ## Milestone 1: Project Setup, CPU Convolution, Profiling
+
 
 ***Deadline: March 1st,2024 8PM***
 
@@ -172,6 +174,133 @@ Make sure to complete your report on Canvas too.  Make sure you include all item
 | List Op Times (CPU convolution implemented) for batch size of 1k images|
 | List whole program execution time (CPU convolution implemented) for batch size of 1k images|
 | Show percentage of total execution time of your program spent in your forward pass function with `gprof`|
+## Milestone 2: Baseline Convolutional Kernel
+
+***Deadline: April 5th,2024 8PM***
+
+| Deliverables |
+| ------------ |
+| Everything from Milestone 1 |
+| Implement a basic GPU Convolution kernel from Lecture 12 |
+| Correctness and timing with 3 different dataset sizes |
+| Complete your report on Canvas: https://canvas.illinois.edu/courses/43562/quizzes/312853 |
+|Submit your work for grading |
+### Project Setup
+1. To start, you will need to clone this repository to your folder in the Delta server. Go to your `ece408git` folder and run the following:
+* `git fetch release`
+* `git merge release/main -m "Project checkpoint 2" --allow-unrelated-histories`
+* `git push origin main`
+
+If you are asked to enter your git credentials (PAT) each time you try to pull or push, you can try to store your git credentials once and for all: just type git config credential.helper store in your Delta terminal.
+
+2. We have already set up the dataset for you in the Delta server under the path `/projects/bche/project/data/fmnist-86/`. Please do not modify it!
+
+4. To compile, simply type `./run.sh build`. This will attempt to clean unrelated files and compile your code. If there are any errors, you will see a message in the terminal. Fix the errors and try to recompile again. Please note that the compilation takes place on the cluster head node which has all the tools but does not have any GPUs. Therefore, you cannot execute your compiled code on the head node. 
+
+5. To execute your code, type `sbatch m2.slurm`. This will schedule the execution of your program on one of the next available compute nodes. The error message during the execution will be input into `Milestone2.err`. Unlike the head node, compute nodes have GPUs and this is where we want our program to be executed. You will get a message like this `Submitted batch job ID` where the last number is your job ID. Typically, jobs will be executed withing a few seconds. However, if your job is not getting executed immediately, you can check its status by typing `squeue --job ID` (do not forget to replace "ID" number with your actual job ID reported by sbatch). 
+
+6. To clean, type `./run.sh clean`. This will remove all the files generated during the compilation and execution process.
+
+### Create a GPU Implementation
+
+Modify `./project/src/layer/custom/new-forward.cu` to create GPU implementation of the forward convolution. In your template, the host code is separated in 3 parts. `conv_forward_gpu_prolog` allocates memory and copies data from host to device (Note: the device pointers given to you in this function are double pointers). `conv_forward_gpu` computes kernel dimensions and invokes kernel. `conv_forward_gpu_epilog` copies output back to host and free the device memory. You should implement your kernel code from Lecture 12 in `conv_forward_kernel`.
+
+Modify `m2.slurm` to run with batch_size=100. Run
+
+    srun ./m2 100 > m2.out
+
+to runs the code specified in `./project/src/layer/custom/new-forward.cu` program for a batch of 100 input images. 
+If your implementation is correct, it will show the same correctness as Milestone 1. 
+The sum of OP times on batch_size=10000 should be approximately 120ms if you implement the basic kernel from Lecture 12 correctly. You must have correct accuracies and total OP time less than 360ms to earn full credits on the coding part. To quicken development time, `m2.cc` takes one optional argument: the dataset size. See [Specifying Batch Size](#specifying-batch-size).
+
+### Use Nsight-Systems and Nsight-Compute for initial Performance Results
+
+**Before you do any profiling, make sure your implementation achieves desired accuracy. Also make sure you do not have any memory errors by running `cuda-memcheck`. See [Checking for Errors](#checking-for-errors) on how to run this.** 
+
+***System level profiling using Nsight-Systems***
+
+We will learn how to use `nsys` (Nsight Systems) to profile the execution at the application level.
+
+Once you've gotten the appropriate accuracy results, generate a profile using `nsys`. Make sure `m2.slurm` is configured for a GPU run. 
+You have to remove `-DCMAKE_CXX_FLAGS=-pg` in `run.sh` and make line of your `run.sh`:
+
+    cmake ./project/ && make -j8
+
+Then, modify `m2.slurm` to generate a profile instead of just executing the code the out put is inside `profile.out` file.
+
+    srun nsys profile --stats=true ./m2 > profile.out
+
+You should see something that looks like the following (but not identical):
+
+~~~bash 
+......
+
+ Time (%)  Total Time (ns)  Num Calls    Avg (ns)      Med (ns)     Min (ns)   Max (ns)    StdDev (ns)          Name         
+ --------  ---------------  ---------  ------------  -------------  --------  -----------  -----------  ---------------------
+     99.9  351,122,724,860      3,519  99,779,120.4  100,089,303.0     2,855  100,130,281  5,413,528.2  poll                 
+      0.1      283,382,530        925     306,359.5       14,207.0     1,051   20,208,549  1,050,067.9  ioctl                
+     ......               
+      0.0            1,913          1       1,913.0        1,913.0     1,913        1,913          0.0  bind                 
+
+[5/8] Executing 'cudaapisum' stats report
+
+ Time (%)  Total Time (ns)  Num Calls    Avg (ns)     Med (ns)    Min (ns)   Max (ns)    StdDev (ns)            Name         
+ --------  ---------------  ---------  ------------  -----------  --------  -----------  ------------  ----------------------
+     ......     
+
+[6/8] Executing 'gpukernsum' stats report
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)      Med (ns)     Min (ns)    Max (ns)   StdDev (ns)      GridXYZ         BlockXYZ                                               Name                                          
+ --------  ---------------  ---------  ------------  ------------  ----------  ----------  -----------  ---------------  --------------  ----------------------------------------------------------------------------------------
+     ......                                                                   
+
+[7/8] Executing 'gpumemtimesum' stats report
+
+ Time (%)  Total Time (ns)  Count    Avg (ns)       Med (ns)      Min (ns)     Max (ns)    StdDev (ns)       Operation     
+ --------  ---------------  -----  -------------  -------------  -----------  -----------  ------------  ------------------
+     ......
+
+[8/8] Executing 'gpumemsizesum' stats report
+
+ Total (MB)  Count  Avg (MB)  Med (MB)  Min (MB)  Max (MB)   StdDev (MB)      Operation     
+ ----------  -----  --------  --------  --------  ---------  -----------  ------------------
+     ......
+
+~~~
+
+The CUDA API Statistics section shows the CUDA API calls that are executed. The CUDA Kernel Statistics lists all the kernels that were executed during the profiling session. There are also more details on the CUDA memory operations (CudaMemcpy) listed.
+There are columns corresponding to percentage of time consumed, total time, number of calls, and average/min/max time of those calls. Use **your** `nsys` profiling output corresponding to the section above to answer the questions for your report.
+
+Think about the distinction between a CUDA API call and a kernel launch, and describe it briefly in your report.
+The CUDA documentation describes [kernels](http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#kernels) and the [programming interface](http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#programming-interface).
+
+You can find more information about `nsys` in the [Nsight Systems Documentation](https://docs.nvidia.com/nsight-systems/UserGuide/#cli-profiling)
+
+***Kernel level profiling using Nsight-Compute***
+
+Nsight-Systems does not give you detailed kernel level performance metrics. For that, we will need to use `nv-nsight-cu-cli` (Nsight-Compute). 
+
+Modify `m2.slurm` to use `nv-nsight-cu-cli` to save some timeline and analysis information, as described in [profiling](#profiling).
+Use the NVIDIA Nsight Compute GUI to find the execution of your kernel, and show a screen shot of the GPU SOL utilization in your report.  You will see performance metrics for two kernel launches, one for each layer.
+The [Nsight Compute installation](#nsight-compute-installation) section describes how to install Nsight-Compute GUI on your personal machine. Note that you do not need CUDA to be installed. 
+
+| Report  |
+| ------------ |
+| Show output of rai running your GPU implementation of convolution (including the OpTimes) |
+| Demonstrate `nsys` profiling the GPU execution |
+| Include a list of all kernels that cumulatively consume more than 90% of the program time (listing from the top of your `nsys` results until the cumulative `Time` is greater than 90%) |
+| Include a list of all CUDA API calls that cumulatively consume more than 90% of the program time |
+| Include an explanation of the difference between kernels and API calls |
+| Screenshot of the GPU SOL utilization in Nsight-Compute GUI for your kernel profiling data (for the first kernel launch of the two convolution kernels). On the upper right corner, you have a drop-down option "Save as image". The default selection is "Copy as image". Use this image as your screenshot.|
+
+### Submitting milestone 2 for grading
+
+To submit your work for grading, add, commit, and push your files:
+
+* ```git add -u```
+* ```git commit -m "some comment"```
+* ```git push origin main```
+Make sure to complete your report on Canvas (https://canvas.illinois.edu/courses/43562/quizzes/312853). Double check you include all items listed in the Deliverables for this milestone.
 
 ## Rubric
 
@@ -208,6 +337,43 @@ Assume we want to check memory errors on Milestone3 binary,
 in your `m3.slurm`, run 
 
     - /bin/bash -c "cuda-memcheck ./m3"
+
+### Profiling
+
+You can gather system level performance information using `nsys`.
+
+For detailed kernel level GPU profiling, use `nv-nsight-cu-cli` and view that information with `nv-nsight-cu`. To enable profiling with these tools,
+you have to remove `-DCMAKE_CXX_FLAGS=-pg` in cmake and make line of your `run.sh`:
+
+    cmake ./project/ && make -j8
+
+You can see some simple information like so (as we did in milestone 2):
+
+    srun nsys profile --stats=true <your command here>
+
+You can additionally gather some detailed kernel level performance metrics.
+
+    srun nv-nsight-cu-cli -f -o analysis_file <your command here>
+
+This will generate `analysis_file.ncu-rep`.
+
+You will need to follow the link rai prints after the execution to retrieve these files.
+You can use the NVIDIA Nsight Compute GUI (`nv-nsight-cu`) to import those files.
+You will need to install NVIDIA NSight Compute on your own machine. It can be downloaded as a standalone application. See instructions [here](#nsight-compute-installation)
+
+To import the files:
+* Launch the GUI `/usr/local/NVIDIA-Nsight-Compute/nv-nsight-cu` (or from wherever you installed it)
+* Close the intial Quick Launch menu
+* Go to File > Open File and select the `.ncu-rep` file from the `\build` folder you downloaded from rai (note that the downloaded file is a `TAR` file, not a `TAR.GZ` as the name implies).
+
+*OR*
+* Directly launch from the terminal `/usr/local/NVIDIA-Nsight-Compute/nv-nsight-cu <filename>.ncu-rep`
+
+For a high-level overview of the Nsight software, visit [here](https://developer.nvidia.com/tools-overview).
+
+### Nsight-compute Installation
+
+Nsight-Compute can be installed as a standalone application. You do not need CUDA to be installed. You can download the installer from NVIDIA's [website](https://developer.nvidia.com/gameworksdownload#?dn=nsight-compute-2020-3-0)
 
 ## License
 
