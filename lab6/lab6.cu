@@ -22,9 +22,9 @@ __global__ void post_scan(float *input, float *output, float *add_amt, int len) 
     int input_loc = blockIdx.x * blockDim.x + threadIdx.x;
     int output_loc = input_loc;
     if(input_loc < len)
-        output[output_loc] = input[input_loc] + add_amt;
+        output[output_loc] = input[input_loc] + add_amt[blockIdx.x];
     if(input_loc + blockDim.x < len)
-        output[output_loc + blockDim.x] = input[input_loc + blockDim.x] + add_amt;
+        output[output_loc + blockDim.x] = input[input_loc + blockDim.x] + add_amt[blockIdx.x];
 }
 
 __global__ void scan(float *input, float *output, float *add_amt, int len) {
@@ -32,7 +32,7 @@ __global__ void scan(float *input, float *output, float *add_amt, int len) {
   //@@ the scan on the device
   //@@ You may need multiple kernel calls; write your kernels before this
   //@@ function and call them from the host
-  float T[2*BLOCK_SIZE];
+  __shared__ float T[2*BLOCK_SIZE];
   int input_loc = blockIdx.x * blockDim.x + threadIdx.x;
   int output_loc = input_loc;
   int T_loc = threadIdx.x;
@@ -65,12 +65,16 @@ __global__ void scan(float *input, float *output, float *add_amt, int len) {
     }
   } 
 
+  __syncthreads(); // Need to make sure all results of last iteration are available before writeback
+
   // Writeback To Global Mem
   if(output_loc < len)
       output[output_loc] = T[T_loc];
   if(output_loc + blockDim.x < len)
-      output[input_loc + blockDim.x] = T[T_loc + blockDim.x];
+      output[output_loc + blockDim.x] = T[T_loc + blockDim.x];
   // Also need to write the add amount to the global memory
+  //if(threadIdx.x == 0)
+  //    add_amt[blockIdx.x] = T[2*BLOCK_SIZE - 1];
 }
 
 int main(int argc, char **argv) {
@@ -112,12 +116,23 @@ int main(int argc, char **argv) {
 
   scan<<<gridDim, blockDim>>>(deviceInput, deviceOutput, add_amt, numElements);
 
+  // Checking first input
+  /*
+  float *check_dev_out = (float *)malloc(numElements * sizeof(float));
+  cudaMemcpy(check_dev_out, deviceOutput, numElements * sizeof(float), cudaMemcpyDeviceToHost);
+  for(int i = 0; i < numElements; i++)
+    wbLog(TRACE, check_dev_out[i]);
+  free(check_dev_out);
+  */
+
+  cudaDeviceSynchronize();
+
   //@@ Modify this to complete the functionality of the scan
   //@@ on the deivce
 
-  post_scan<<<gridDim, blockDim>>>(deviceInput, deviceOutput, add_amt, numElements);
+  //post_scan<<<gridDim, blockDim>>>(deviceInput, deviceOutput, add_amt, numElements);
 
-  cudaDeviceSynchronize();
+  //cudaDeviceSynchronize();
 
   // Copying output memory to the CPU
   wbCheck(cudaMemcpy(hostOutput, deviceOutput, numElements * sizeof(float),
