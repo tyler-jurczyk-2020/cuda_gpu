@@ -18,13 +18,14 @@
     }                                                                     \
   } while (0)
 
-__global__ void post_scan(float *input, float *output, float *add_amt, int len) {
-    int input_loc = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void post_scan(float *output, float *add_amt, int len) {
+    int input_loc = blockIdx.x * 2*blockDim.x + threadIdx.x;
     int output_loc = input_loc;
-    if(input_loc < len)
-        output[output_loc] = input[input_loc] + add_amt[blockIdx.x];
-    if(input_loc + blockDim.x < len)
-        output[output_loc + blockDim.x] = input[input_loc + blockDim.x] + add_amt[blockIdx.x];
+    __syncthreads(); // Make sure add_amt values are correct
+    if(input_loc + 2*blockDim.x < len)
+        output[output_loc + 2*blockDim.x] += add_amt[blockIdx.x];
+    if(input_loc + 3*blockDim.x < len)
+        output[output_loc + 3*blockDim.x] += add_amt[blockIdx.x];
 }
 
 __global__ void scan(float *input, float *output, float *add_amt, int len) {
@@ -33,7 +34,7 @@ __global__ void scan(float *input, float *output, float *add_amt, int len) {
   //@@ You may need multiple kernel calls; write your kernels before this
   //@@ function and call them from the host
   __shared__ float T[2*BLOCK_SIZE];
-  int input_loc = blockIdx.x * blockDim.x + threadIdx.x;
+  int input_loc = blockIdx.x * 2*blockDim.x + threadIdx.x;
   int output_loc = input_loc;
   int T_loc = threadIdx.x;
 
@@ -73,8 +74,47 @@ __global__ void scan(float *input, float *output, float *add_amt, int len) {
   if(output_loc + blockDim.x < len)
       output[output_loc + blockDim.x] = T[T_loc + blockDim.x];
   // Also need to write the add amount to the global memory
-  //if(threadIdx.x == 0)
-  //    add_amt[blockIdx.x] = T[2*BLOCK_SIZE - 1];
+  int end_of_block = blockIdx.x * 2*blockDim.x + 2*blockDim.x;
+  if(threadIdx.x == 0 && end_of_block < len)
+      add_amt[blockIdx.x] = T[2*BLOCK_SIZE - 1];
+
+  if(blockIdx.x == 0) {
+      __syncthreads(); // Sync before performing aux scan
+
+      // Reduction Step For AUX
+      for(int stride = 1; stride < 2*BLOCK_SIZE; stride *= 2) {
+        __syncthreads();
+        int index = (threadIdx.x + 1) * stride * 2 - 1;
+        if(index < 2*BLOCK_SIZE && (index-stride) >= 0) {
+          add_amt[index] += add_amt[index-stride];
+        }
+      }
+
+      // Post Scan Step For AUX
+      for(int stride = BLOCK_SIZE/2; stride > 0; stride /= 2) {
+        __syncthreads();
+        int index = (threadIdx.x + 1) * stride * 2 - 1;
+        if(index + stride < 2*BLOCK_SIZE) {
+          add_amt[index + stride] += add_amt[index];
+        }
+      }
+  }
+}
+
+void check_output(int numElements, float *deviceOutput) {
+  float *check_dev_out = (float *)malloc(numElements * sizeof(float));
+  cudaMemcpy(check_dev_out, deviceOutput, numElements * sizeof(float), cudaMemcpyDeviceToHost);
+  for(int i = 0; i < numElements; i++)
+    wbLog(TRACE, check_dev_out[i]);
+  free(check_dev_out);
+}
+
+void check_amount(int numBlocks, float *add_amt) {
+  float *check_dev_out = (float *)malloc(numBlocks * sizeof(float));
+  cudaMemcpy(check_dev_out, add_amt, numBlocks * sizeof(float), cudaMemcpyDeviceToHost);
+  for(int i = 0; i < numBlocks; i++)
+    wbLog(TRACE, check_dev_out[i]);
+  free(check_dev_out);
 }
 
 int main(int argc, char **argv) {
@@ -116,23 +156,14 @@ int main(int argc, char **argv) {
 
   scan<<<gridDim, blockDim>>>(deviceInput, deviceOutput, add_amt, numElements);
 
-  // Checking first input
-  /*
-  float *check_dev_out = (float *)malloc(numElements * sizeof(float));
-  cudaMemcpy(check_dev_out, deviceOutput, numElements * sizeof(float), cudaMemcpyDeviceToHost);
-  for(int i = 0; i < numElements; i++)
-    wbLog(TRACE, check_dev_out[i]);
-  free(check_dev_out);
-  */
-
   cudaDeviceSynchronize();
 
   //@@ Modify this to complete the functionality of the scan
   //@@ on the deivce
 
-  //post_scan<<<gridDim, blockDim>>>(deviceInput, deviceOutput, add_amt, numElements);
+  post_scan<<<gridDim, blockDim>>>(deviceOutput, add_amt, numElements);
 
-  //cudaDeviceSynchronize();
+  cudaDeviceSynchronize();
 
   // Copying output memory to the CPU
   wbCheck(cudaMemcpy(hostOutput, deviceOutput, numElements * sizeof(float),
