@@ -151,7 +151,8 @@ int main(int argc, char **argv) {
   dim3 gridDim(numBlocks, 1, 1);
   dim3 blockDim(BLOCK_SIZE, 1, 1);
 
-  cudaMalloc(&add_amt, numBlocks * sizeof(float));
+  cudaMalloc(&add_amt, 2*BLOCK_SIZE * sizeof(float));
+  cudaMemset(add_amt, 0, 2*BLOCK_SIZE * sizeof(float));
 
   scan<<<gridDim, blockDim>>>(deviceInput, deviceOutput, add_amt, numElements);
 
