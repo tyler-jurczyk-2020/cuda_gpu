@@ -21,7 +21,6 @@
 __global__ void post_scan(float *output, float *add_amt, int len) {
     int input_loc = blockIdx.x * 2*blockDim.x + threadIdx.x;
     int output_loc = input_loc;
-    __syncthreads(); // Make sure add_amt values are correct
     if(input_loc + 2*blockDim.x < len)
         output[output_loc + 2*blockDim.x] += add_amt[blockIdx.x];
     if(input_loc + 3*blockDim.x < len)
