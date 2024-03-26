@@ -16,10 +16,6 @@
     }                                                                     \
   } while (0)
 
-__global__ void test(float *input) {
-    input[0] = 2.0f;
-}
-
 __global__ void histogram_grayscale_conversion(float *input, unsigned char *buf, unsigned char *gray_buf, int *histogram, int width, int height, int channels) {
     int x = channels * (blockIdx.x * blockDim.x + threadIdx.x);
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,7 +55,7 @@ __global__ void equalization(unsigned char *buf, int width, int height, int chan
     }
 }
 
-__global__ void histogram_scan(int *input, float *output, int len) {
+__global__ void histogram_scan(int *input, float *output, int len, int width, int height) {
   //@@ Modify the body of this function to complete the functionality of
   //@@ the scan on the device
   //@@ You may need multiple kernel calls; write your kernels before this
@@ -68,14 +64,15 @@ __global__ void histogram_scan(int *input, float *output, int len) {
   int input_loc = blockIdx.x * 2*blockDim.x + threadIdx.x;
   int output_loc = input_loc;
   int T_loc = threadIdx.x;
+  int size = width * height;
 
   // Load Shared Mem
   if(input_loc < len)
-      T[T_loc] = input[input_loc];
+      T[T_loc] = input[input_loc]/(1.0f*size);
   else
       T[T_loc] = 0;
   if(input_loc + blockDim.x < len)
-      T[T_loc + blockDim.x] = input[input_loc + blockDim.x];
+      T[T_loc + blockDim.x] = input[input_loc + blockDim.x]/(1.0f*size);
   else
       T[T_loc + blockDim.x] = 0;
 
@@ -194,12 +191,14 @@ int main(int argc, char **argv) {
   // check_device_float_array(deviceInput, 10);
   // check_device_char_array(buffer, image_size);
   // check_device_char_array(gray_buf, image_size_no_channel);
-  check_device_int_array(histogram, HISTOGRAM_LENGTH);
+  // check_device_int_array(histogram, HISTOGRAM_LENGTH);
 
   // Args: float *input, float *output, int len
-  histogram_scan<<<1, HISTOGRAM_LENGTH>>>(histogram, cdf, HISTOGRAM_LENGTH);
+  histogram_scan<<<1, BLOCK_SIZE>>>(histogram, cdf, HISTOGRAM_LENGTH, imageWidth, imageHeight);
   cudaDeviceSynchronize();
-
+  // Check second kernel results
+  // check_device_float_array(cdf, HISTOGRAM_LENGTH);
+  
   // Args: char *buf, int width, int height, int channels, float *cdf, float *output
   equalization<<<grid_dim, block_dim>>>(buffer, imageWidth, imageHeight, imageChannels, cdf, deviceOutput);
   cudaDeviceSynchronize();
