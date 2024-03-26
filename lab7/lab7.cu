@@ -3,7 +3,8 @@
 #include <wb.h>
 
 #define HISTOGRAM_LENGTH 256
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 128
+#define BLOCK_DIM 32
 
 #define wbCheck(stmt)                                                     \
   do {                                                                    \
@@ -21,9 +22,9 @@ __global__ void test(float *input) {
 
 __global__ void histogram_grayscale_conversion(float *input, unsigned char *buf, unsigned char *gray_buf, int *histogram, int width, int height, int channels) {
     int x = channels * (blockIdx.x * blockDim.x + threadIdx.x);
-    int x_raw = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
-    int pixel_loc = (y * width) + x;
+    int x_raw = blockIdx.x * blockDim.x + threadIdx.x;
+    int pixel_loc = (y * width * channels) + x;
     int pixel_loc_raw = (y * width) + x_raw;
     if(x_raw < width && y < height) {
         for(int i = 0; i < channels; i++) {
@@ -41,7 +42,7 @@ __global__ void histogram_grayscale_conversion(float *input, unsigned char *buf,
     __syncthreads();
 
     if(x_raw < width && y < height) {
-        atomicInc((unsigned int *)(histogram + gray_buf[pixel_loc_raw]), 1);
+        atomicAdd((unsigned int *)(histogram + gray_buf[pixel_loc_raw]), 1);
     }
 }
 
@@ -180,23 +181,21 @@ int main(int argc, char **argv) {
 
   wbCheck(cudaMemcpy(deviceInput, hostInputImageData, image_size * sizeof(float), cudaMemcpyHostToDevice));
 
-  int num_blocks_x = ceil((1.0f*imageWidth)/(3 * BLOCK_SIZE));
-  int num_blocks_y = ceil((1.0f*imageHeight)/BLOCK_SIZE);
+  int num_blocks_x = ceil((1.0f*imageWidth)/BLOCK_DIM);
+  int num_blocks_y = ceil((1.0f*imageHeight)/BLOCK_DIM);
 
   dim3 grid_dim(num_blocks_x, num_blocks_y, 1);
-  dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
+  dim3 block_dim(BLOCK_DIM, BLOCK_DIM, 1);
 
   // Args: float *input, char *buf, char *gray_buf, int *histogram, int width, int height, int channels
-  // histogram_grayscale_conversion<<<grid_dim, block_dim>>>(deviceInput, buffer, gray_buf, histogram, imageWidth, imageHeight, imageChannels);
-  // cudaDeviceSynchronize();
-  test<<<1, 1>>>(deviceInput);
+  histogram_grayscale_conversion<<<grid_dim, block_dim>>>(deviceInput, buffer, gray_buf, histogram, imageWidth, imageHeight, imageChannels);
   cudaDeviceSynchronize();
   // Check first kernel results
-  check_device_float_array(deviceInput, 10);
-  //check_device_char_array(buffer, 10);
-  //check_device_int_array(histogram, 10);
+  // check_device_float_array(deviceInput, 10);
+  // check_device_char_array(buffer, image_size);
+  // check_device_char_array(gray_buf, image_size_no_channel);
+  check_device_int_array(histogram, HISTOGRAM_LENGTH);
 
-  /*
   // Args: float *input, float *output, int len
   histogram_scan<<<1, HISTOGRAM_LENGTH>>>(histogram, cdf, HISTOGRAM_LENGTH);
   cudaDeviceSynchronize();
@@ -207,8 +206,7 @@ int main(int argc, char **argv) {
 
   wbCheck(cudaMemcpy(hostOutputImageData, deviceOutput, image_size, cudaMemcpyDeviceToHost));
   wbImage_setData(outputImage, hostOutputImageData);
-  wbSolution(args, outputImage);
-  */
+  // wbSolution(args, outputImage);
   //@@ insert code here
 
   cudaFree(deviceInput);
