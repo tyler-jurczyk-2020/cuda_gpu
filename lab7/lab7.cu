@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
   float *deviceOutput;
   char *buf;
   char *gray_buf;
-  int  *histogram;
+  int *histogram;
   float *cdf;
 
   args = wbArg_read(argc, argv); /* parse the input arguments */
@@ -153,6 +153,9 @@ int main(int argc, char **argv) {
   equalization<<<grid_dim, block_dim>>>(buf, imageWidth, imageHeight, imageChannels, cdf, deviceOutput);
   cudaDeviceSynchronize();
 
+  cudaMemcpy(hostOutputImageData, deviceOutput, image_size, cudaMemcpyDeviceToHost);
+  wbImage_setData(outputImage, hostOutputImageData);
+  
   wbSolution(args, outputImage);
 
   //@@ insert code here
