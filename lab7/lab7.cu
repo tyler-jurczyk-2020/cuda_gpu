@@ -5,29 +5,47 @@
 #define HISTOGRAM_LENGTH 256
 #define BLOCK_SIZE 1024
 
-__global__ void histogram_grayscale_conversion(float *input, char *buf, char *gray_buf, int *histogram, int width, int height, int channels) {
+#define wbCheck(stmt)                                                     \
+  do {                                                                    \
+    cudaError_t err = stmt;                                               \
+    if (err != cudaSuccess) {                                             \
+      wbLog(ERROR, "Failed to run stmt ", #stmt);                         \
+      wbLog(ERROR, "Got CUDA error ...  ", cudaGetErrorString(err));      \
+      return -1;                                                          \
+    }                                                                     \
+  } while (0)
+
+__global__ void test(float *input) {
+    input[0] = 2.0f;
+}
+
+__global__ void histogram_grayscale_conversion(float *input, unsigned char *buf, unsigned char *gray_buf, int *histogram, int width, int height, int channels) {
     int x = channels * (blockIdx.x * blockDim.x + threadIdx.x);
     int x_raw = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y + threadIdx.y);
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
     int pixel_loc = (y * width) + x;
     int pixel_loc_raw = (y * width) + x_raw;
-    if(x < 3*width && y < height) {
+    if(x_raw < width && y < height) {
         for(int i = 0; i < channels; i++) {
             buf[pixel_loc + i] = (unsigned char)(255 * input[pixel_loc + i]);
         }
-        __syncthreads();
+    }
+    __syncthreads();
 
+    if(x_raw < width && y < height) {
         int r = buf[pixel_loc];
         int g = buf[pixel_loc + 1];
         int b = buf[pixel_loc + 2];
         gray_buf[pixel_loc_raw] = (unsigned char) (0.21*r + 0.71*g + 0.07*b);
-        __syncthreads();
+    }
+    __syncthreads();
 
+    if(x_raw < width && y < height) {
         atomicInc((unsigned int *)(histogram + gray_buf[pixel_loc_raw]), 1);
     }
 }
 
-__global__ void equalization(char *buf, int width, int height, int channels, float *cdf, float *output) {
+__global__ void equalization(unsigned char *buf, int width, int height, int channels, float *cdf, float *output) {
     int x = channels * (blockIdx.x * blockDim.x + threadIdx.x);
     int y = (blockIdx.y * blockDim.y + threadIdx.y);
     int pixel_loc = (y * width) + x;
@@ -87,6 +105,35 @@ __global__ void histogram_scan(int *input, float *output, int len) {
       output[output_loc + blockDim.x] = T[T_loc + blockDim.x];
 }
 
+int check_device_float_array(float *array, int amt) {
+    float *local = (float *) malloc(amt * sizeof(float));
+    wbCheck(cudaMemcpy(local, array, amt * sizeof(float), cudaMemcpyDeviceToHost));
+    for(int i = 0; i < amt; i++) {
+        wbLog(TRACE, local[i]);
+    }
+    free(local);
+    return 0;
+}
+
+int check_device_char_array(unsigned char *array, int amt) {
+    unsigned char *local = (unsigned char *) malloc(amt * sizeof(unsigned char));
+    wbCheck(cudaMemcpy(local, array, amt * sizeof(unsigned char), cudaMemcpyDeviceToHost));
+    for(int i = 0; i < amt; i++) {
+        wbLog(TRACE, (int) local[i]);
+    }
+    free(local);
+    return 0;
+}
+
+int check_device_int_array(int *array, int amt) {
+    int *local = (int *) malloc(amt * sizeof(int));
+    wbCheck(cudaMemcpy(local, array, amt * sizeof(int), cudaMemcpyDeviceToHost));
+    for(int i = 0; i < amt; i++) {
+        wbLog(TRACE, local[i]);
+    }
+    free(local);
+    return 0;
+}
 
 int main(int argc, char **argv) {
   wbArg_t args;
@@ -102,8 +149,8 @@ int main(int argc, char **argv) {
   //@@ Insert more code here
   float *deviceInput;
   float *deviceOutput;
-  char *buf;
-  char *gray_buf;
+  unsigned char *buffer;
+  unsigned char *gray_buf;
   int *histogram;
   float *cdf;
 
@@ -118,22 +165,20 @@ int main(int argc, char **argv) {
   imageChannels = wbImage_getChannels(inputImage);
   outputImage = wbImage_new(imageWidth, imageHeight, imageChannels);
 
-  size_t image_size = imageWidth * imageHeight * imageChannels * sizeof(float);
-  size_t image_size_no_channel = imageWidth * imageHeight * sizeof(float);
-  size_t histogram_size = HISTOGRAM_LENGTH * sizeof(int);
-  size_t cdf_size = HISTOGRAM_LENGTH * sizeof(int);
+  int image_size = imageWidth * imageHeight * imageChannels;
+  int image_size_no_channel = imageWidth * imageHeight;
   hostInputImageData = (float *)wbImage_getData(inputImage);
   hostOutputImageData = (float *)malloc(image_size);
 
   //@@ insert code here
-  cudaMalloc(&deviceInput, image_size);
-  cudaMalloc(&deviceOutput, image_size);
-  cudaMalloc(&buf, image_size);
-  cudaMalloc(&gray_buf, image_size_no_channel);
-  cudaMalloc(&histogram, histogram_size);
-  cudaMalloc(&cdf, cdf_size);
+  wbCheck(cudaMalloc(&deviceInput, image_size * sizeof(float)));
+  wbCheck(cudaMalloc(&deviceOutput, image_size * sizeof(float)));
+  wbCheck(cudaMalloc(&buffer, image_size * sizeof(unsigned char)));
+  wbCheck(cudaMalloc(&gray_buf, image_size_no_channel * sizeof(unsigned char) ));
+  wbCheck(cudaMalloc(&histogram, HISTOGRAM_LENGTH * sizeof(int)));
+  wbCheck(cudaMalloc(&cdf, HISTOGRAM_LENGTH * sizeof(float)));
 
-  cudaMemcpy(deviceInput, hostInputImageData, image_size, cudaMemcpyHostToDevice);
+  wbCheck(cudaMemcpy(deviceInput, hostInputImageData, image_size * sizeof(float), cudaMemcpyHostToDevice));
 
   int num_blocks_x = ceil((1.0f*imageWidth)/(3 * BLOCK_SIZE));
   int num_blocks_y = ceil((1.0f*imageHeight)/BLOCK_SIZE);
@@ -142,31 +187,39 @@ int main(int argc, char **argv) {
   dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
 
   // Args: float *input, char *buf, char *gray_buf, int *histogram, int width, int height, int channels
-  histogram_grayscale_conversion<<<grid_dim, block_dim>>>(deviceInput, buf, gray_buf, histogram, imageWidth, imageHeight, imageChannels);
+  // histogram_grayscale_conversion<<<grid_dim, block_dim>>>(deviceInput, buffer, gray_buf, histogram, imageWidth, imageHeight, imageChannels);
+  // cudaDeviceSynchronize();
+  test<<<1, 1>>>(deviceInput);
   cudaDeviceSynchronize();
+  // Check first kernel results
+  check_device_float_array(deviceInput, 10);
+  //check_device_char_array(buffer, 10);
+  //check_device_int_array(histogram, 10);
 
+  /*
   // Args: float *input, float *output, int len
   histogram_scan<<<1, HISTOGRAM_LENGTH>>>(histogram, cdf, HISTOGRAM_LENGTH);
   cudaDeviceSynchronize();
 
   // Args: char *buf, int width, int height, int channels, float *cdf, float *output
-  equalization<<<grid_dim, block_dim>>>(buf, imageWidth, imageHeight, imageChannels, cdf, deviceOutput);
+  equalization<<<grid_dim, block_dim>>>(buffer, imageWidth, imageHeight, imageChannels, cdf, deviceOutput);
   cudaDeviceSynchronize();
 
-  cudaMemcpy(hostOutputImageData, deviceOutput, image_size, cudaMemcpyDeviceToHost);
+  wbCheck(cudaMemcpy(hostOutputImageData, deviceOutput, image_size, cudaMemcpyDeviceToHost));
   wbImage_setData(outputImage, hostOutputImageData);
-  
   wbSolution(args, outputImage);
-
+  */
   //@@ insert code here
-  free(hostOutputImageData);
 
   cudaFree(deviceInput);
   cudaFree(deviceOutput);
-  cudaFree(buf);
+  cudaFree(buffer);
   cudaFree(gray_buf);
   cudaFree(histogram);
   cudaFree(cdf);
+
+  free(hostInputImageData);
+  free(hostOutputImageData);
 
   return 0;
 }
