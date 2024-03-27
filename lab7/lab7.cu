@@ -173,7 +173,8 @@ int main(int argc, char **argv) {
   int image_size = imageWidth * imageHeight * imageChannels;
   int image_size_no_channel = imageWidth * imageHeight;
   hostInputImageData = (float *)wbImage_getData(inputImage);
-  hostOutputImageData = (float *)malloc(image_size);
+  hostOutputImageData = (float *)malloc(image_size * sizeof(float));
+  wbImage_setData(outputImage, hostOutputImageData);
 
   //@@ insert code here
   wbCheck(cudaMalloc(&deviceInput, image_size * sizeof(float)));
@@ -210,16 +211,15 @@ int main(int argc, char **argv) {
   equalization<<<grid_dim, block_dim>>>(buffer, imageWidth, imageHeight, imageChannels, cdf, deviceOutput);
   cudaDeviceSynchronize();
   // Check final kernel results
-  check_device_float_array(deviceOutput, image_size);
+  // check_device_float_array(deviceOutput, image_size);
   
-  wbCheck(cudaMemcpy(hostOutputImageData, deviceOutput, image_size, cudaMemcpyDeviceToHost));
+  wbCheck(cudaMemcpy(hostOutputImageData, deviceOutput, image_size * sizeof(float), cudaMemcpyDeviceToHost));
 
   // Testing
   // const char *solutionOutput = wbArg_getExpectedOutputFile(args);
   // hostOutputImageData = wbImage_getData(wbImport(solutionOutput)); 
   // check_host_float_array(hostOutputImageData, image_size);
 
-  wbImage_setData(outputImage, hostOutputImageData);
   wbSolution(args, outputImage);
   //@@ insert code here
 
