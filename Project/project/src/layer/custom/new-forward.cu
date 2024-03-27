@@ -2,6 +2,8 @@
 #include <iostream>
 #include "gpu-new-forward.h"
 
+#define BLOCK_SIZE 32
+
 __global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     /*
@@ -47,6 +49,19 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
 __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, const float *host_input, const float *host_mask, float **device_output_ptr, float **device_input_ptr, float **device_mask_ptr, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     // Allocate memory and copy over the relevant data structures to the GPU
+    size_t input_size = Batch * Channel * Width * Height * sizeof(float);
+    size_t output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
+    size_t mask_size = K * K * sizeof(float); 
+    cudaMalloc(device_input_ptr, input_size);
+    cudaMalloc(device_output_ptr, output_size);
+    cudaMalloc(device_mask_ptr, mask_size);
+
+    cudaMemcpy(*device_input_ptr, host_input, input_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(*device_mask_ptr, host_mask, mask_size, cudaMemcpyHostToDevice);
+
+    conv_forward_gpu(*device_output_ptr, *device_input_ptr, *device_mask_ptr, Batch, Map_out, Channel, Height, Width, K);
+
+    conv_forward_gpu_epilog((float *)host_output, *device_output_ptr, *device_input_ptr, *device_mask_ptr, Batch, Map_out, Channel, Height, Width, K);
 
     // We pass double pointers for you to initialize the relevant device pointers,
     //  which are passed to the other two functions.
@@ -58,23 +73,35 @@ __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, co
     //     std::cout<<"CUDA error: "<<cudaGetErrorString(error)<<std::endl;
     //     exit(-1);
     // }
-
 }
 
 
 __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *device_input, const float *device_mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     // Set the kernel dimensions and call the kernel
+    int output_width = Width - K + 1;
+    int output_height = Height - K + 1;
+    int output_width_tiles = ceil(1.0f*output_width/BLOCK_SIZE);
+    int output_height_tiles = ceil(1.0f*output_height/BLOCK_SIZE);
 
+    // May need to adjust grid dimensions later on
+    dim3 grid_dim(Map_out, output_width_tiles * output_height_tiles, Batch);
+    dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
+
+    conv_forward_kernel<<<grid_dim, block_dim>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K);
 }
 
 
 __host__ void GPUInterface::conv_forward_gpu_epilog(float *host_output, float *device_output, float *device_input, float *device_mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     // Copy the output back to host
+    size_t output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
+    cudaMemcpy(host_output, device_output, output_size, cudaMemcpyDeviceToHost);
 
     // Free device memory
-
+    cudaFree(device_input);
+    cudaFree(device_output);
+    cudaFree(device_mask);
 }
 
 
