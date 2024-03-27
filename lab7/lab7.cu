@@ -30,9 +30,9 @@ __global__ void histogram_grayscale_conversion(float *input, unsigned char *buf,
     __syncthreads();
 
     if(x_raw < width && y < height) {
-        int r = buf[pixel_loc];
-        int g = buf[pixel_loc + 1];
-        int b = buf[pixel_loc + 2];
+        unsigned char r = buf[pixel_loc];
+        unsigned char g = buf[pixel_loc + 1];
+        unsigned char b = buf[pixel_loc + 2];
         gray_buf[pixel_loc_raw] = (unsigned char) (0.21*r + 0.71*g + 0.07*b);
     }
     __syncthreads();
@@ -102,6 +102,12 @@ __global__ void histogram_scan(int *input, float *output, int len, int width, in
       output[output_loc] = T[T_loc];
   if(output_loc + blockDim.x < len)
       output[output_loc + blockDim.x] = T[T_loc + blockDim.x];
+}
+
+void check_host_float_array(float *array, int amt) {
+    for(int i = 0; i < amt; i++) {
+        wbLog(TRACE, array[i]);
+    }
 }
 
 int check_device_float_array(float *array, int amt) {
@@ -205,8 +211,14 @@ int main(int argc, char **argv) {
   cudaDeviceSynchronize();
   // Check final kernel results
   check_device_float_array(deviceOutput, image_size);
-
+  
   wbCheck(cudaMemcpy(hostOutputImageData, deviceOutput, image_size, cudaMemcpyDeviceToHost));
+
+  // Testing
+  // const char *solutionOutput = wbArg_getExpectedOutputFile(args);
+  // hostOutputImageData = wbImage_getData(wbImport(solutionOutput)); 
+  // check_host_float_array(hostOutputImageData, image_size);
+
   wbImage_setData(outputImage, hostOutputImageData);
   wbSolution(args, outputImage);
   //@@ insert code here
