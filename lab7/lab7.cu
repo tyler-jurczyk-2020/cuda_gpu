@@ -185,6 +185,7 @@ int main(int argc, char **argv) {
   wbCheck(cudaMalloc(&cdf, HISTOGRAM_LENGTH * sizeof(float)));
 
   wbCheck(cudaMemcpy(deviceInput, hostInputImageData, image_size * sizeof(float), cudaMemcpyHostToDevice));
+  wbCheck(cudaMemset(histogram, 0, HISTOGRAM_LENGTH * sizeof(int)));
 
   int num_blocks_x = ceil((1.0f*imageWidth)/BLOCK_DIM);
   int num_blocks_y = ceil((1.0f*imageHeight)/BLOCK_DIM);
