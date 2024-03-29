@@ -20,7 +20,9 @@ One more thing, if you are asked to enter your git credentials (PAT) each time y
 
 Before starting this lab, make sure that:
 
-* You have reviewed lectures on parallel scan and histogramming
+* You have reviewed lectures on Sparse Matrix Multiplication.
+* You have completed Lab7.
+
 
 ## Instruction
 
