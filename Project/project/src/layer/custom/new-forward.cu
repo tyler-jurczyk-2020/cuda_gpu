@@ -4,7 +4,7 @@
 
 #define BLOCK_SIZE 32
 
-__global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
+__global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
 {
     /*
     Modify this function to implement the forward pass described in Chapter 16.
@@ -38,7 +38,42 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
     #define mask_4d(i3, i2, i1, i0) mask[(i3) * (Channel * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 
     // Insert your GPU convolution kernel code here
-    
+    int shared_tile_dim = BLOCK_SIZE + K - 1;
+    int shared_tile_area = shared_tile_dim * shared_tile_dim;
+    extern __shared__ float shared_mem[];
+    float *shared_tile = shared_mem;
+    float *shared_mask = shared_mem + shared_tile_area;
+    int nth_in = blockIdx.z;
+    int map = blockIdx.y;
+    int w0 = threadIdx.x;
+    int h0 = threadIdx.y;
+    int h_base = (blockIdx.x / out_grid_width) * BLOCK_SIZE;
+    int w_base = (blockIdx.x % out_grid_width) * BLOCK_SIZE;
+    int h = h_base + h0;
+    int w = w_base + w0;
+    float sum = 0;
+
+    for(int c = 0; c < Channel; c++) {
+        // Load mask into shared mem
+        if(h0 < K && w0 < K) {
+            shared_mask[h0 * K + w0] = mask_4d(map, c, h0, w0);
+        } 
+        __syncthreads();
+        // Load input into shared mem
+        for(int i = h; i < h_base + shared_tile_dim; i += BLOCK_SIZE) {
+            for(int j = w; j < w_base + shared_tile_dim; j += BLOCK_SIZE) {
+                shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = in_4d(map, c, h, w);  
+            }
+        }
+        __syncthreads();
+        for(int p = 0; p < K; p++) {
+            for(int q = 0; q < K; q++) {
+                sum += shared_tile[(h + p) * K + (w + q)];
+            }
+        }
+        __syncthreads();
+    }
+    out_4d(nth_in, map, h, w) = sum;
 
     #undef out_4d
     #undef in_4d
@@ -83,12 +118,15 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     int output_height = Height - K + 1;
     int output_width_tiles = ceil(1.0f*output_width/BLOCK_SIZE);
     int output_height_tiles = ceil(1.0f*output_height/BLOCK_SIZE);
+    int shared_tile_mem = (BLOCK_SIZE + K - 1) * (BLOCK_SIZE + K - 1);
+    int shared_mask_mem = K * K;
 
-    // May need to adjust grid dimensions later on
-    dim3 grid_dim(Map_out, output_width_tiles * output_height_tiles, Batch);
+    // Using lecture slide implementation
+    dim3 grid_dim(output_width_tiles * output_height_tiles, Map_out, Batch);
     dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
+    size_t shared_mem = (shared_tile_mem + shared_mask_mem) * sizeof(float);
 
-    conv_forward_kernel<<<grid_dim, block_dim>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K);
+    conv_forward_kernel<<<grid_dim, block_dim, shared_mem>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
 }
 
 
