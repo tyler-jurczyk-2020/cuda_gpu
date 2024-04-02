@@ -86,7 +86,7 @@ __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, co
     // Allocate memory and copy over the relevant data structures to the GPU
     size_t input_size = Batch * Channel * Width * Height * sizeof(float);
     size_t output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
-    size_t mask_size = K * K * sizeof(float); 
+    size_t mask_size = Map_out * Channel * K * K * sizeof(float); 
     cudaMalloc(device_input_ptr, input_size);
     cudaMalloc(device_output_ptr, output_size);
     cudaMalloc(device_mask_ptr, mask_size);
