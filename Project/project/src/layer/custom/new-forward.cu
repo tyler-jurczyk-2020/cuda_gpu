@@ -62,7 +62,7 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
         // Load input into shared mem
         for(int i = h; i < h_base + shared_tile_dim; i += BLOCK_SIZE) {
             for(int j = w; j < w_base + shared_tile_dim; j += BLOCK_SIZE) {
-                shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = in_4d(map, c, h, w);  
+                shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = in_4d(nth_in, c, h, w);  
             }
         }
         __syncthreads();
