@@ -62,18 +62,23 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
         // Load input into shared mem
         for(int i = h; i < h_base + shared_tile_dim; i += BLOCK_SIZE) {
             for(int j = w; j < w_base + shared_tile_dim; j += BLOCK_SIZE) {
-                shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = in_4d(nth_in, c, h, w);  
+                if(i < Height && j < Width)
+                    shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = in_4d(nth_in, c, i, j);  
+                else
+                    shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = 0;
             }
         }
         __syncthreads();
         for(int p = 0; p < K; p++) {
             for(int q = 0; q < K; q++) {
-                sum += shared_tile[(h + p) * K + (w + q)];
+                if(h0 + p < shared_tile_dim && w0 + q < shared_tile_dim)
+                    sum += shared_tile[(h0 + p) * shared_tile_dim + (w0 + q)] * shared_mask[p * K + q];
             }
         }
         __syncthreads();
     }
-    out_4d(nth_in, map, h, w) = sum;
+    if(h < Height_out && w < Width_out)
+        out_4d(nth_in, map, h, w) = sum;
 
     #undef out_4d
     #undef in_4d
