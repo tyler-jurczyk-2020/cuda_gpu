@@ -2,9 +2,9 @@
 #include <iostream>
 #include "gpu-new-forward.h"
 
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 16
 
-__global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
+__global__ void conv_forward_kernel_adv(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
 {
     /*
     Modify this function to implement the forward pass described in Chapter 16.
@@ -41,8 +41,8 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
     int shared_tile_dim = BLOCK_SIZE + K - 1;
     int shared_tile_area = shared_tile_dim * shared_tile_dim;
     extern __shared__ float shared_mem[];
-    float *shared_tile = shared_mem;
-    float *shared_mask = shared_mem + shared_tile_area;
+    float *shared_tile = &shared_mem[0];
+    float *shared_mask = &shared_mem[shared_tile_area];
     int nth_in = blockIdx.z;
     int map = blockIdx.y;
     int w0 = threadIdx.x;
@@ -71,8 +71,7 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
         __syncthreads();
         for(int p = 0; p < K; p++) {
             for(int q = 0; q < K; q++) {
-                if(h0 + p < shared_tile_dim && w0 + q < shared_tile_dim)
-                    sum += shared_tile[(h0 + p) * shared_tile_dim + (w0 + q)] * shared_mask[p * K + q];
+                sum += shared_tile[(h0 + p) * shared_tile_dim + (w0 + q)] * shared_mask[p * K + q];
             }
         }
         __syncthreads();
@@ -80,6 +79,68 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
     if(h < Height_out && w < Width_out)
         out_4d(nth_in, map, h, w) = sum;
 
+    #undef out_4d
+    #undef in_4d
+    #undef mask_4d
+}
+
+__global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
+{
+    /*
+    Modify this function to implement the forward pass described in Chapter 16.
+    We have added an additional dimension to the tensors to support an entire mini-batch
+    The goal here is to be correct AND fast.
+
+    Function paramter definitions:
+    output - output
+    input - input
+    mask - convolution kernel
+    Batch - batch_size (number of images in x)
+    Map_out - number of output feature maps
+    Channel - number of input feature maps
+    Height - input height dimension
+    Width - input width dimension
+    K - kernel height and width (K x K)
+    */
+
+    const int Height_out = Height - K + 1;
+    const int Width_out = Width - K + 1;
+    (void)Height_out; // silence declared but never referenced warning. remove this line when you start working
+    (void)Width_out; // silence declared but never referenced warning. remove this line when you start working
+
+    // We have some nice #defs for you below to simplify indexing. Feel free to use them, or create your own.
+    // An example use of these macros:
+    // float a = in_4d(0,0,0,0)
+    // out_4d(0,0,0,0) = a
+
+    #define out_4d(i3, i2, i1, i0) output[(i3) * (Map_out * Height_out * Width_out) + (i2) * (Height_out * Width_out) + (i1) * (Width_out) + i0]
+    #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width) + (i2) * (Height * Width) + (i1) * (Width) + i0]
+    #define mask_4d(i3, i2, i1, i0) mask[(i3) * (Channel * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
+
+    // Insert your GPU convolution kernel code here
+    int nth_in = blockIdx.z;
+    int map = blockIdx.y;
+    int w0 = threadIdx.x;
+    int h0 = threadIdx.y;
+    int h_base = (blockIdx.x / out_grid_width) * BLOCK_SIZE;
+    int w_base = (blockIdx.x % out_grid_width) * BLOCK_SIZE;
+    int h = h_base + h0;
+    int w = w_base + w0;
+    float sum = 0;
+
+    for(int c = 0; c < Channel; c++) {
+        for(int p = 0; p < K; p++) {
+            for(int q = 0; q < K; q++) {
+                if(h < Height_out && w < Width_out) {
+                    sum += in_4d(nth_in, c, h + p, w + q) * mask_4d(map, c, p , q);
+                }
+            }
+        }
+    }
+    if(h < Height_out && w < Width_out) {
+        out_4d(nth_in, map, h, w) = sum;
+    }
+    
     #undef out_4d
     #undef in_4d
     #undef mask_4d
@@ -98,10 +159,6 @@ __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, co
 
     cudaMemcpy(*device_input_ptr, host_input, input_size, cudaMemcpyHostToDevice);
     cudaMemcpy(*device_mask_ptr, host_mask, mask_size, cudaMemcpyHostToDevice);
-
-    conv_forward_gpu(*device_output_ptr, *device_input_ptr, *device_mask_ptr, Batch, Map_out, Channel, Height, Width, K);
-
-    conv_forward_gpu_epilog((float *)host_output, *device_output_ptr, *device_input_ptr, *device_mask_ptr, Batch, Map_out, Channel, Height, Width, K);
 
     // We pass double pointers for you to initialize the relevant device pointers,
     //  which are passed to the other two functions.
@@ -131,7 +188,10 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
     size_t shared_mem = (shared_tile_mem + shared_mask_mem) * sizeof(float);
 
-    conv_forward_kernel<<<grid_dim, block_dim, shared_mem>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
+    // conv_forward_kernel_adv<<<grid_dim, block_dim, shared_mem>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
+    conv_forward_kernel<<<grid_dim, block_dim>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
+
+    cudaDeviceSynchronize();
 }
 
 
