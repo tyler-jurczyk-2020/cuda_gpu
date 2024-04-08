@@ -131,9 +131,9 @@ These are the list of optimizations we will consider valid for Milestone 3. To o
 | 8 | Input channel reduction: tree | 2 |
 | 9 | Input channel reduction: atomics | 1 |
 | 10 | Fixed point (FP16) arithmetic implementation (this can modify model accuracy slightly) | 3 |
-| 12 | Using Tensor Cores to speed up matrix multiplication | 5 |
-| 13 | An advanced matrix multiplication algorithm (register-tiled, for example) | 6 |
-| 14 | Overlap-Add method for FFT-based convolution (note this is **very** hard, and may not yield a large performace increase due to mask size) | 8 |
+| 11 | Using Tensor Cores to speed up matrix multiplication | 5 |
+| 12 | An advanced matrix multiplication algorithm (register-tiled, for example) | 6 |
+| 13 | Overlap-Add method for FFT-based convolution (note this is **very** hard, and may not yield a large performace increase due to mask size) | 8 |
 
 
 ### Extra credits in the project
