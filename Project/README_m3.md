@@ -95,6 +95,9 @@ Reminder: this will **only** run your `new-forward.cu` file inside of `/project/
 - **We strongly recommend that you periodically make commits**, local or not, to ensure that you have a record of your work saved. You can always just soft reset to merge your commits. It also provides proof in case something goes wrong with submissions.
 
 ### Milestone 3 Report Submission Guidelines through Canvas
+As the world's best engineers and scientists, it is imperative to document our work meticulously and analyze data with scientific rigor. In case analyze statistical results from your profiling results, we recommend to take a look at this [thesis](http://impact.crhc.illinois.edu/shared/report/phd-thesis-shane-ryoo.pdf) and pay particular attention to Section 5.1 for reference and inspiration.
+
+**We give you a report template: `ECE408_S24_netid_m3_report.docx`.** Please use this document to get started with your report.
 
 Follow the following steps for each GPU optimization:
 | Step | For each optimization |
@@ -132,9 +135,6 @@ These are the list of optimizations we will consider valid for Milestone 3. To o
 | 13 | An advanced matrix multiplication algorithm (register-tiled, for example) | 6 |
 | 14 | Overlap-Add method for FFT-based convolution (note this is **very** hard, and may not yield a large performace increase due to mask size) | 8 |
 
-## Report
-
-As the world's best engineers and scientists, it is imperative to document our work meticulously and analyze data with scientific rigor. In case analyze statistical results from your profiling results, we recommend to take a look at this [thesis](http://impact.crhc.illinois.edu/shared/report/phd-thesis-shane-ryoo.pdf) and pay particular attention to Section 5.1 for reference and inspiration.
 
 ### Extra credits in the project
 
