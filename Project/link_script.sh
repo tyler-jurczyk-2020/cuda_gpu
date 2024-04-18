@@ -1,6 +1,10 @@
 #!/bin/bash
 
-rm ./new-forward.cu
+if [ -e /u/tjurczyk/ece408/Project/project/src/layer/custom/new-forward.cu ]; then
+    echo "Cleaning up old symlink"
+    rm /u/tjurczyk/ece408/Project/project/src/layer/custom/new-forward.cu
+fi
+
 if [ -z "$1" ]; then
     echo "Provide an optimization to run (ex. op_1)"
     exit 1
