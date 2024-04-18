@@ -3,8 +3,13 @@
 #include "gpu-new-forward.h"
 
 #define BLOCK_SIZE 32
+#define STREAM_COUNT 4
 
-// OP_2 --> Tiled (Shared Memory) Convolution
+// OP_0 --> Using streams to overlap computation with data transfer
+
+static cudaStream_t streams [STREAM_COUNT];
+static float *device_inputs [STREAM_COUNT];
+static float *device_outputs [STREAM_COUNT];
 
 __global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
 {
@@ -12,7 +17,6 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
     Modify this function to implement the forward pass described in Chapter 16.
     We have added an additional dimension to the tensors to support an entire mini-batch
     The goal here is to be correct AND fast.
-
     Function paramter definitions:
     output - output
     input - input
@@ -40,11 +44,6 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
     #define mask_4d(i3, i2, i1, i0) mask[(i3) * (Channel * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 
     // Insert your GPU convolution kernel code here
-    int shared_tile_dim = BLOCK_SIZE + K - 1;
-    int shared_tile_area = shared_tile_dim * shared_tile_dim;
-    extern __shared__ float shared_mem[];
-    float *shared_tile = shared_mem;
-    float *shared_mask = shared_mem + shared_tile_area;
     int nth_in = blockIdx.z;
     int map = blockIdx.y;
     int w0 = threadIdx.x;
@@ -56,32 +55,17 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
     float sum = 0;
 
     for(int c = 0; c < Channel; c++) {
-        // Load mask into shared mem
-        if(h0 < K && w0 < K) {
-            shared_mask[h0 * K + w0] = mask_4d(map, c, h0, w0);
-        } 
-        __syncthreads();
-        // Load input into shared mem
-        for(int i = h; i < h_base + shared_tile_dim; i += BLOCK_SIZE) {
-            for(int j = w; j < w_base + shared_tile_dim; j += BLOCK_SIZE) {
-                if(i < Height && j < Width)
-                    shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = in_4d(nth_in, c, i, j);  
-                else
-                    shared_tile[(i - h_base) * shared_tile_dim + (j - w_base)] = 0;
-            }
-        }
-        // Compute sum over mask
-        __syncthreads();
         for(int p = 0; p < K; p++) {
             for(int q = 0; q < K; q++) {
-                sum += shared_tile[(h0 + p) * shared_tile_dim + (w0 + q)] * shared_mask[p * K + q];
+                if(h < Height_out && w < Width_out) {
+                    sum += in_4d(nth_in, c, h + p, w + q) * mask_4d(map, c, p , q);
+                }
             }
         }
-        __syncthreads();
     }
-    // Writeback out
-    if(h < Height_out && w < Width_out)
+    if(h < Height_out && w < Width_out) {
         out_4d(nth_in, map, h, w) = sum;
+    }
 
     #undef out_4d
     #undef in_4d
@@ -92,14 +76,19 @@ __global__ void conv_forward_kernel(float *output, const float *input, const flo
 __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, const float *host_input, const float *host_mask, float **device_output_ptr, float **device_input_ptr, float **device_mask_ptr, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     // Allocate memory and copy over the relevant data structures to the GPU
-    size_t input_size = Batch * Channel * Width * Height * sizeof(float);
-    size_t output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
+    size_t input_size = ceil(1.0f*Batch/STREAM_COUNT) * Channel * Width * Height * sizeof(float);
+    size_t output_size = ceil(1.0f*Batch/STREAM_COUNT) * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
     size_t mask_size = Map_out * Channel * K * K * sizeof(float); 
-    cudaMalloc(device_input_ptr, input_size);
-    cudaMalloc(device_output_ptr, output_size);
-    cudaMalloc(device_mask_ptr, mask_size);
 
-    cudaMemcpy(*device_input_ptr, host_input, input_size, cudaMemcpyHostToDevice);
+    // Create streams
+    for(int i = 0; i < STREAM_COUNT; i++) {
+        cudaStreamCreate(streams + i);
+        cudaMallocHost(device_inputs + i, input_size);
+        cudaMallocHost(device_outputs + i, output_size);
+        cudaMemcpyAsync(device_inputs[i], host_input + i*(input_size/sizeof(float)), input_size, cudaMemcpyHostToDevice, streams[i]);
+    }
+
+    cudaMalloc(device_mask_ptr, mask_size);
     cudaMemcpy(*device_mask_ptr, host_mask, mask_size, cudaMemcpyHostToDevice);
 
     // We pass double pointers for you to initialize the relevant device pointers,
@@ -122,25 +111,27 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     int output_height = Height - K + 1;
     int output_width_tiles = ceil(1.0f*output_width/BLOCK_SIZE);
     int output_height_tiles = ceil(1.0f*output_height/BLOCK_SIZE);
-    int shared_tile_mem = (BLOCK_SIZE + K - 1) * (BLOCK_SIZE + K - 1);
-    int shared_mask_mem = K * K;
 
     // Using lecture slide implementation
-    dim3 grid_dim(output_width_tiles * output_height_tiles, Map_out, Batch);
+    int batch_size = ceil((1.0f*Batch)/STREAM_COUNT);
+    dim3 grid_dim(output_width_tiles * output_height_tiles, Map_out, batch_size);
     dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
-    size_t shared_mem = (shared_tile_mem + shared_mask_mem) * sizeof(float);
 
-    conv_forward_kernel<<<grid_dim, block_dim, shared_mem>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
-
+    for(int i = 0; i < STREAM_COUNT; i++) {
+        conv_forward_kernel<<<grid_dim, block_dim, 0, streams[i]>>>(device_outputs[i], device_inputs[i], device_mask, batch_size, Map_out, Channel, Height, Width, K, output_width_tiles);
+    }
     cudaDeviceSynchronize();
 }
 
 
 __host__ void GPUInterface::conv_forward_gpu_epilog(float *host_output, float *device_output, float *device_input, float *device_mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
-    // Copy the output back to host
-    size_t output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
-    cudaMemcpy(host_output, device_output, output_size, cudaMemcpyDeviceToHost);
+    size_t output_size = ceil(1.0f*Batch/STREAM_COUNT) * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
+    // Copy out result and destroy streams
+    for(int i = 0; i < STREAM_COUNT; i++) {
+        cudaMemcpyAsync(host_output + i*(output_size/sizeof(float)), device_outputs[i], output_size, cudaMemcpyDeviceToHost, streams[i]);
+        cudaStreamDestroy(streams[i]); 
+    }
 
     // Free device memory
     cudaFree(device_input);
