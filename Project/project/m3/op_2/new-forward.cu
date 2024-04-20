@@ -186,8 +186,9 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     // Set the kernel dimensions and call the kernel
     int output_width = Width - K + 1;
     int output_height = Height - K + 1;
-    int num_blocks_unroll = ceil((Channel * output_width * output_height)/(BLOCK_SIZE));
-    int num_blocks_matmul = ceil((Channel * K * K * output_width * output_height)/(BLOCK_SIZE*BLOCK_SIZE));
+    int num_blocks_unroll = ceil((1.0f*Channel * output_width * output_height)/BLOCK_SIZE);
+    int num_blocks_matmul_x = ceil((1.0f*Channel * K * K * output_width * output_height)/BLOCK_SIZE);
+    int num_blocks_matmul_y = ceil((1.0f*Map_out)/BLOCK_SIZE);
 
     // Unrolled Input
     float *device_unrolled_input;
@@ -198,7 +199,7 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     // Only need to unroll per image, not per map
     dim3 unroll_grid_dim(num_blocks_unroll, 1, Batch);
     dim3 unroll_block_dim(BLOCK_SIZE, 1, 1);
-    dim3 matmul_grid_dim(num_blocks_matmul, 1, Batch);
+    dim3 matmul_grid_dim(num_blocks_matmul_x, num_blocks_matmul_y, Batch);
     dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
 
     // Launch unrolling kernel
