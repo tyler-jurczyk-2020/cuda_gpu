@@ -132,10 +132,9 @@ __global__ void conv_forward_kernel_matmul(float *output, const float *input, co
 
   // Unrolling constants
   int nth_in = blockIdx.z;
-  int map = blockIdx.y;
 
   float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, 0);
-  float *outputMat = (float *) &out_4d(nth_in, map, 0, 0);
+  float *outputMat = (float *) &out_4d(nth_in, 0, 0, 0);
 
   int numARows = Map_out;
   int numAColumns = Channel * K * K;
@@ -183,7 +182,7 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     // Set the kernel dimensions and call the kernel
     int output_width = Width - K + 1;
     int output_height = Height - K + 1;
-    int num_blocks_unroll = ceil((Channel * output_width * output_height)/(BLOCK_SIZE*BLOCK_SIZE));
+    int num_blocks_unroll = ceil((Channel * output_width * output_height)/(BLOCK_SIZE));
     int num_blocks_matmul = ceil((Channel * K * K * output_width * output_height)/(BLOCK_SIZE*BLOCK_SIZE));
 
     // Unrolled Input
@@ -192,12 +191,14 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     cudaMalloc(&device_unrolled_input, unroll_input_size);
 
     // Using lecture slide implementation
-    dim3 unroll_grid_dim(num_blocks_unroll, Map_out, Batch);
-    dim3 matmul_grid_dim(num_blocks_matmul, Map_out, Batch);
+    // Only need to unroll per image, not per map
+    dim3 unroll_grid_dim(num_blocks_unroll, 1, Batch);
+    dim3 unroll_block_dim(BLOCK_SIZE, 1, 1);
+    dim3 matmul_grid_dim(num_blocks_matmul, 1, Batch);
     dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
 
     // Launch unrolling kernel
-    conv_forward_kernel_unroll<<<unroll_grid_dim, block_dim>>>(device_unrolled_input, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K);
+    conv_forward_kernel_unroll<<<unroll_grid_dim, unroll_block_dim>>>(device_unrolled_input, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K);
 
     cudaDeviceSynchronize();
 
