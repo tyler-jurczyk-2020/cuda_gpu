@@ -3,6 +3,7 @@
 #include "gpu-new-forward.h"
 
 #define BLOCK_SIZE 32
+#define TILE_WIDTH 32
 
 // OP_2 --> Base Input Matrix Unrolling & Tile Matrix Multiplication 
 
@@ -39,8 +40,11 @@ __global__ void conv_forward_kernel_unroll(float *output, const float *input, co
     // out_4d(0,0,0,0) = a
     const int Mask_size = K * K;
 
-    #define out_4d(i3, i2, i1, i0) output[(i3) * (Channel * Height * Width * Mask_size) + (i2) * (Height * Width * Mask_size) + (i1) * (Width * Mask_size) + i0]
+    // Access input as normal
     #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width) + (i2) * (Height * Width) + (i1) * (Width) + i0]
+    // Special acccess for unrolled matrix
+    // (Batch, Row, Column)
+    #define in_unrolled_3d(i2, i1, i0) output[(i2) * (Channel * Mask_size * Height_out * Width_out) + (i1) * (Height_out * Width_out) + i0]
 
     // Insert your GPU convolution kernel code here
     // Shared mem
@@ -52,7 +56,7 @@ __global__ void conv_forward_kernel_unroll(float *output, const float *input, co
     float *shared_mask = shared_mem + shared_tile_area;
     */
     int thread = blockIdx.x * blockDim.x + threadIdx.x;
-    int channel, channel_thread, h_out, w_out, h_unroll, w_base, w_unroll;
+    int channel, channel_thread, h_out, w_out, h_unroll, h_base, w_unroll;
     int nth_in = blockIdx.z;
 
     if(thread < Channel * Unroll_Width) {
@@ -60,19 +64,60 @@ __global__ void conv_forward_kernel_unroll(float *output, const float *input, co
         channel_thread = thread % Unroll_Width;
         h_out = channel_thread / Width_out;
         w_out  = channel_thread % Width_out;
-        h_unroll = h_out * Width_out + w_out;
-        w_base = channel * K * K; 
+        w_unroll = h_out * Width_out + w_out;
+        h_base = channel * K * K; 
         for(int p = 0; p < K; p++) {
             for(int q = 0; q < K; q++) {
-                w_unroll = w_base + p * K + q;
-                out_4d(nth_in, channel, h_unroll, w_unroll) = in_4d(nth_in, channel, h_out + p, w_out + q); 
+                h_unroll = h_base + p * K + q;
+                in_unrolled_3d(nth_in, h_unroll, w_unroll) = in_4d(nth_in, channel, h_out + p, w_out + q); 
             }
         }
     }
 
-    #undef out_4d
     #undef in_4d
+    #undef in_unrolled_3d
 }
+
+// Compute C = A * B
+__device__ void matrixMultiplyShared(float *A, float *B, float *C,
+                                     int numARows, int numAColumns,
+                                     int numBRows, int numBColumns,
+                                     int numCRows, int numCColumns) {
+  //@@ Insert code to implement matrix multiplication here
+  //@@ You have to use shared memory for this MP
+  __shared__ float subtileA[TILE_WIDTH][TILE_WIDTH];
+  __shared__ float subtileB[TILE_WIDTH][TILE_WIDTH];
+
+  int row = blockIdx.y * TILE_WIDTH + threadIdx.y;
+  int col = blockIdx.x * TILE_WIDTH + threadIdx.x;
+
+  float val = 0;
+  int width = numAColumns; // = numBRows
+
+  for(int i = 0; i < (width - 1)/TILE_WIDTH + 1; i++) {
+    if(row < numARows && i * TILE_WIDTH + threadIdx.x < width) {
+      subtileA[threadIdx.y][threadIdx.x] = A[row * numAColumns + i * TILE_WIDTH + threadIdx.x];
+    }
+    else {
+      subtileA[threadIdx.y][threadIdx.x] = 0;  
+    }
+    if(i * TILE_WIDTH + threadIdx.y < width && col < numBColumns) {
+      subtileB[threadIdx.y][threadIdx.x] = B[(i * TILE_WIDTH + threadIdx.y) * numBColumns + col];
+    }
+    else {
+      subtileB[threadIdx.y][threadIdx.x] = 0;
+    }
+    __syncthreads();
+    for(int j = 0; j < TILE_WIDTH; j++) {
+        val += subtileA[threadIdx.y][j] * subtileB[j][threadIdx.x];
+    }
+    __syncthreads();
+  }
+  if(row < numARows and col < numBColumns) {
+    C[row * numBColumns + col] = val;
+  }
+}
+
 
 // Compute C = A * B
 __global__ void conv_forward_kernel_matmul(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
@@ -80,7 +125,7 @@ __global__ void conv_forward_kernel_matmul(float *output, const float *input, co
   const int Mask_size = K * K;
 
   #define out_4d(i3, i2, i1, i0) output[(i3) * (Map_out * Height_out * Width_out) + (i2) * (Height_out * Width_out) + (i1) * (Width_out) + i0]
-  #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width * Mask_size) + (i2) * (Height * Width * Mask_size) + (i1) * (Width * Mask_size) + i0]
+  #define in_unrolled_3d(i2, i1, i0) output[(i2) * (Channel * Mask_size * Height_out * Width_out) + (i1) * (Height_out * Width_out) + i0]
   #define mask_4d(i3, i2, i1, i0) mask[(i3) * (Channel * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 
   const int Height_out = Height - K + 1;
@@ -88,187 +133,33 @@ __global__ void conv_forward_kernel_matmul(float *output, const float *input, co
 
   // Unrolling constants
   const int Unroll_Width = Height_out * Width_out * K * K; // Also considering mask in width
-  const int Expanded_Width_out = Width_out * K * K;
-
-  //@@ Insert code to implement matrix multiplication here
-  //@@ You have to use shared memory for this MP
-  __shared__ float subtileA[BLOCK_SIZE][BLOCK_SIZE]; // Mask
-  __shared__ float subtileB[BLOCK_SIZE][BLOCK_SIZE]; // Input 
 
   int thread = blockIdx.x * blockDim.x + threadIdx.x;
   int nth_in = blockIdx.z;
   int map = blockIdx.y;
   int channel = thread / Unroll_Width; 
-  int channel_thread = thread % Unroll_Width;
-  int h_out = channel_thread / Expanded_Width_out;
-  int w_out = (channel_thread % Expanded_Width_out) / (K * K);
-  int h_unroll = h_out * Width_out + w_out; // Actual output mapping
-  int w_unroll = (channel * K * K) + thread % (K * K);
   // Tiled access to unrolled input
-  int h_unroll_tile = h_unroll % BLOCK_SIZE;
-  int w_unroll_tile = w_unroll % BLOCK_SIZE;
 
-  int linear_mask = thread % (K * K);
-  int h_mask = linear_mask / K;
-  int w_mask = linear_mask % K;
-
-  int linear_mask_tile = (channel * K * K + linear_mask) % BLOCK_SIZE;
-  int map_tile = map % BLOCK_SIZE;
-
-  int row = map;
-  int col = h_out * Width_out + w_out;
-
-  float val = 0;
-  int width = Channel * K * K; // = numBRows
+  float *maskMat = (float *) &mask_4d(map, channel, 0, 0);
+  float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, 0);
+  float *outputMat = (float *) &out_4d(nth_in, map, 0, 0);
 
   int numARows = Map_out;
-  // int numAColumns = unrolling_height;
-  // int numBRows = unrolling_height;
+  int numAColumns = Channel * K * K;
+  int numBRows = Channel * K * K;
   int numBColumns = Height_out * Width_out;
-  // int numCRows = map;
-  // int numColumns = Unroll_Width;
-
-  // Assuming layout as seen in textbook
-  // threadIdx.x is the output pixel horizontally
-  // 
-  for(int i = 0; i < (width - 1)/BLOCK_SIZE + 1; i++) {
-    if(row < numARows && i * BLOCK_SIZE + linear_mask_tile < width) {
-      subtileA[map_tile][linear_mask_tile] = mask_4d(map, channel, h_mask, w_mask);
-    }
-    else {
-      subtileA[map_tile][linear_mask_tile] = 0;  
-    }
-    if(i * BLOCK_SIZE + w_unroll_tile < width && col < numBColumns) {
-      subtileB[w_unroll_tile][h_unroll_tile] = in_4d(nth_in, channel, h_unroll, w_unroll);
-    }
-    else {
-      subtileB[w_unroll_tile][h_unroll_tile] = 0;
-    }
-    __syncthreads();
-    for(int j = 0; j < BLOCK_SIZE; j++) {
-        val += subtileA[map_tile][j] * subtileB[j][h_unroll_tile];
-    }
-    __syncthreads();
-  }
-  if(row < numARows and col < numBColumns) {
-    out_4d(nth_in, map, h_out, w_out) = val;
-  }
-  #undef out_4d
-  #undef in_4d
-  #undef mask_4d
-}
-
-// Compute C = A * B
-__global__ void matrixMultiply(float *A, float *B, float *C, int numARows,
-                               int numAColumns, int numBRows,
-                               int numBColumns, int numCRows,
-                               int numCColumns)
-{
-  //@@ Implement matrix multiplication kernel here
-  // Simple implementation, should be improved upon
-
-  int r = blockIdx.y * blockDim.y + threadIdx.y;
-  int c = blockIdx.x * blockDim.x + threadIdx.x;
-  int width = numAColumns;
-  if(r < numCRows && c < numCColumns) {
-      float sum = 0;
-      for(int k = 0; k < width; k++) {
-        float a = A[r * numAColumns + k];
-        float b = B[k * numBColumns + c];
-        sum += a * b;
-      }
-      C[r * numCColumns + c] = sum;
-  }
-}
-
-/* 
-// Compute C = A * B
-__global__ void conv_forward_kernel_matmul(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
-{
-  const int Mask_size = K * K;
-
-  #define out_4d(i3, i2, i1, i0) output[(i3) * (Map_out * Height_out * Width_out) + (i2) * (Height_out * Width_out) + (i1) * (Width_out) + i0]
-  #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width * Mask_size) + (i2) * (Height * Width * Mask_size) + (i1) * (Width * Mask_size) + i0]
-  #define mask_4d(i3, i2, i1, i0) mask[(i3) * (Channel * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
-
-  const int Height_out = Height - K + 1;
-  const int Width_out = Width - K + 1;
-
-  // Unrolling constants
-  const int Unroll_Width = Height_out * Width_out * K * K; // Also considering mask in width
-  const int Expanded_Width_out = Width_out * K * K;
+  int numCRows = Map_out;
+  int numCColumns = Height_out * Width_out;
 
   //@@ Insert code to implement matrix multiplication here
   //@@ You have to use shared memory for this MP
-  __shared__ float subtileA[BLOCK_SIZE][BLOCK_SIZE]; // Mask
-  __shared__ float subtileB[BLOCK_SIZE][BLOCK_SIZE]; // Input 
-
-  int thread = blockIdx.x * blockDim.x + threadIdx.x;
-  int nth_in = blockIdx.z;
-  int map = blockIdx.y;
-  int channel = thread / Unroll_Width; 
-  int channel_thread = thread % Unroll_Width;
-  int h_out = channel_thread / Expanded_Width_out;
-  int w_out = (channel_thread % Expanded_Width_out) / (K * K);
-  int h_unroll = h_out * Width_out + w_out; // Actual output mapping
-  int w_unroll = (channel * K * K) + thread % (K * K);
-  // Tiled access to unrolled input
-  int h_unroll_tile = h_unroll % BLOCK_SIZE;
-  int w_unroll_tile = w_unroll % BLOCK_SIZE;
-
-  int linear_mask = thread % (K * K);
-  int h_mask = linear_mask / K;
-  int w_mask = linear_mask % K;
-
-  int linear_mask_tile = (channel * K * K + linear_mask) % BLOCK_SIZE;
-  int map_tile = map % BLOCK_SIZE;
-
-  int row = map;
-  int col = h_out * Width_out + w_out;
-
-  float val = 0;
-  int width = Channel * K * K; // = numBRows
-
-  int numARows = Map_out;
-  // int numAColumns = unrolling_height;
-  // int numBRows = unrolling_height;
-  int numBColumns = Height_out * Width_out;
-  // int numCRows = map;
-  // int numColumns = Unroll_Width;
-
-  // Assuming layout as seen in textbook
-  // threadIdx.x is the output pixel horizontally
-  // 
-  for(int i = 0; i < (width - 1)/BLOCK_SIZE + 1; i++) {
-    if(row < numARows && i * BLOCK_SIZE + linear_mask_tile < width) {
-      subtileA[map_tile][linear_mask_tile] = mask_4d(map, channel, h_mask, w_mask);
-    }
-    else {
-      subtileA[map_tile][linear_mask_tile] = 0;  
-    }
-    if(i * BLOCK_SIZE + w_unroll_tile < width && col < numBColumns) {
-      subtileB[w_unroll_tile][h_unroll_tile] = in_4d(nth_in, channel, h_unroll, w_unroll);
-    }
-    else {
-      subtileB[w_unroll_tile][h_unroll_tile] = 0;
-    }
-    __syncthreads();
-    for(int j = 0; j < BLOCK_SIZE; j++) {
-        val += subtileA[map_tile][j] * subtileB[j][h_unroll_tile];
-    }
-    __syncthreads();
-  }
-  if(row < numARows and col < numBColumns) {
-    out_4d(nth_in, map, h_out, w_out) = val;
-  }
-  #undef out_4d
+  matrixMultiplyShared(maskMat, inputMat, outputMat, numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
+  
   #undef in_4d
+  #undef in_unrolled_3d
   #undef mask_4d
 }
 
-*/ 
-
-	
 __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, const float *host_input, const float *host_mask, float **device_output_ptr, float **device_input_ptr, float **device_mask_ptr, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     // Allocate memory and copy over the relevant data structures to the GPU
