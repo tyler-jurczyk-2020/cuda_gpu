@@ -131,21 +131,25 @@ __global__ void conv_forward_kernel_matmul(float *output, const float *input, co
   const int Width_out = Width - K + 1;
 
   // Unrolling constants
+  int thread = blockIdx.x * blockDim.x + threadIdx.x;
   int nth_in = blockIdx.z;
 
-  float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, 0);
-  float *outputMat = (float *) &out_4d(nth_in, 0, 0, 0);
+  if(thread < Channel * K * K * Height_out * Width_out) {
+    float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, 0);
+    float *outputMat = (float *) &out_4d(nth_in, 0, 0, 0);
 
-  int numARows = Map_out;
-  int numAColumns = Channel * K * K;
-  int numBRows = Channel * K * K;
-  int numBColumns = Height_out * Width_out;
-  int numCRows = Map_out;
-  int numCColumns = Height_out * Width_out;
+    int numARows = Map_out;
+    int numAColumns = Channel * K * K;
+    int numBRows = Channel * K * K;
+    int numBColumns = Height_out * Width_out;
+    int numCRows = Map_out;
+    int numCColumns = Height_out * Width_out;
 
-  //@@ Insert code to implement matrix multiplication here
-  //@@ You have to use shared memory for this MP
-  matrixMultiplyShared((float *) mask, inputMat, outputMat, numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
+      //@@ Insert code to implement matrix multiplication here
+      //@@ You have to use shared memory for this MP
+      // Only call this function if thread is in range
+    matrixMultiplyShared((float *) mask, inputMat, outputMat, numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns);
+  }
   
   #undef in_4d
   #undef in_unrolled_3d
