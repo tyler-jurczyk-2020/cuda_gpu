@@ -43,7 +43,7 @@ __device__ void matrixMultiplyShared(float *A, float *B, float *C,
     __syncthreads();
   }
   if(row < numARows and col < numBColumns) {
-    C[row * numBColumns + col] = val;
+    C[row * numCColumns + col] = val;
   }
 }
 
@@ -97,16 +97,19 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, fl
     float *shared_mask = shared_mem + shared_tile_area;
     */
     int thread_x = blockIdx.x * blockDim.x + threadIdx.x;
-    int thread_y = blockIdx.y * blockDim.y + threadIdx.y;
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    // int thread_y = blockIdx.y * blockDim.y + threadIdx.y;
     int channel, channel_thread, h_out, w_out, h_unroll, h_base, w_unroll;
     int nth_in = blockIdx.z;
 
-    // Input unrolling
-    if(thread_x < Channel * Unroll_Width && thread_y == 0) {
-        channel = thread_x / Unroll_Width; 
-        channel_thread = thread_x % Unroll_Width;
+    // Input unrolling per tile
+    if(thread_x < Unroll_Width && ty < Channel) {
+        channel = ty; 
+        // Need to consider how blocks in the same column write the same location?
+        channel_thread = blockIdx.x * blockDim.x + tx;
         h_out = channel_thread / Width_out;
-        w_out  = channel_thread % Width_out;
+        w_out = channel_thread % Width_out;
         w_unroll = h_out * Width_out + w_out;
         h_base = channel * K * K; 
         for(int p = 0; p < K; p++) {
@@ -117,17 +120,18 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, fl
         }
     }
 
+    // Need to consider how to synchronization doesn't synchronize across all blocks loading into memory!!
     __syncthreads();
 
     // Matrix multiplicaiton
       if(thread_x < Channel * K * K * Height_out * Width_out) {
-        float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, 0);
-        float *outputMat = (float *) &out_4d(nth_in, 0, 0, 0);
+        float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, blockIdx.x * blockDim.x);
+        float *outputMat = (float *) &out_4d(nth_in, 0, blockIdx.y * blockDim.y, blockIdx.x * blockDim.x);
 
         int numARows = Map_out;
         int numAColumns = Channel * K * K;
         int numBRows = Channel * K * K;
-        int numBColumns = Height_out * Width_out;
+        int numBColumns = BLOCK_SIZE;
         int numCRows = Map_out;
         int numCColumns = Height_out * Width_out;
 
