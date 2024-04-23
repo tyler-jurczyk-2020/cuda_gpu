@@ -47,7 +47,7 @@ __device__ void matrixMultiplyShared(float *A, float *B, float *C,
   }
 }
 
-__global__ void conv_forward_kernel_fusion(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
+__global__ void conv_forward_kernel_fusion(float *output, const float *input, float *unrolled_input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     /*
     Modify this function to implement the forward pass described in Chapter 16.
@@ -66,7 +66,7 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, co
     K - kernel height and width (K x K)
     */
 
-    __shared__ float unrolled_input [300][BLOCK_SIZE];
+
 
     const int Height_out = Height - K + 1;
     const int Width_out = Width - K + 1;
@@ -78,13 +78,13 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, co
     // An example use of these macros:
     // float a = in_4d(0,0,0,0)
     // out_4d(0,0,0,0) = a
-    // const int Mask_size = K * K;
+    const int Mask_size = K * K;
 
     // Access input as normal
     #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width) + (i2) * (Height * Width) + (i1) * (Width) + i0]
     // Special acccess for unrolled matrix
     // (Batch, Row, Column)
-    #define in_unrolled_3d(i1, i0) unrolled_input[i1][i0]
+    #define in_unrolled_3d(i2, i1, i0) unrolled_input[(i2) * (Channel * Mask_size * Height_out * Width_out) + (i1) * (Height_out * Width_out) + i0]
     #define out_4d(i3, i2, i1, i0) output[(i3) * (Map_out * Height_out * Width_out) + (i2) * (Height_out * Width_out) + (i1) * (Width_out) + i0]
 
     // Insert your GPU convolution kernel code here
@@ -100,7 +100,7 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, co
     int tx = threadIdx.x;
     int ty = threadIdx.y;
     // int thread_y = blockIdx.y * blockDim.y + threadIdx.y;
-    int channel, channel_thread, h_out, w_out, h_unroll, h_base; //w_unroll;
+    int channel, channel_thread, h_out, w_out, h_unroll, h_base, w_unroll;
     int nth_in = blockIdx.z;
 
     // Input unrolling per tile
@@ -110,12 +110,12 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, co
         channel_thread = blockIdx.x * blockDim.x + tx;
         h_out = channel_thread / Width_out;
         w_out = channel_thread % Width_out;
-        //w_unroll = h_out * Width_out + w_out;
+        w_unroll = h_out * Width_out + w_out;
         h_base = channel * K * K; 
         for(int p = 0; p < K; p++) {
             for(int q = 0; q < K; q++) {
                 h_unroll = h_base + p * K + q;
-                in_unrolled_3d(h_unroll, tx) = in_4d(nth_in, channel, h_out + p, w_out + q); 
+                in_unrolled_3d(nth_in, h_unroll, w_unroll) = in_4d(nth_in, channel, h_out + p, w_out + q); 
             }
         }
     }
@@ -125,7 +125,7 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, co
 
     // Matrix multiplicaiton
       if(thread_x < Channel * K * K * Height_out * Width_out) {
-        float *inputMat = (float *) &unrolled_input;
+        float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, blockIdx.x * blockDim.x);
         float *outputMat = (float *) &out_4d(nth_in, 0, blockIdx.y * blockDim.y, blockIdx.x * blockDim.x);
 
         int numARows = Map_out;
@@ -181,15 +181,22 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     int num_blocks_matmul_x = ceil((1.0f*Channel * K * K * output_width * output_height)/BLOCK_SIZE);
     int num_blocks_matmul_y = ceil((1.0f*Map_out)/BLOCK_SIZE);
 
+    // Unrolled Input
+    float *device_unrolled_input;
+    size_t unroll_input_size = Batch * Channel * K * K * output_width * output_height * sizeof(float);
+    cudaMalloc(&device_unrolled_input, unroll_input_size);
+
     // Using lecture slide implementation
     // Only need to unroll per image, not per map
     dim3 fusion_grid_dim(num_blocks_matmul_x, num_blocks_matmul_y, Batch);
     dim3 fusion_block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
 
     // Launch unrolling kernel
-    conv_forward_kernel_fusion<<<fusion_grid_dim, fusion_block_dim>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K);
+    conv_forward_kernel_fusion<<<fusion_grid_dim, fusion_block_dim>>>(device_output, device_input, device_unrolled_input, device_mask, Batch, Map_out, Channel, Height, Width, K);
 
     cudaDeviceSynchronize();
+
+    cudaFree(device_unrolled_input);
 }
 
 
