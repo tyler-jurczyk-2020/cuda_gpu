@@ -84,7 +84,7 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, fl
     #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width) + (i2) * (Height * Width) + (i1) * (Width) + i0]
     // Special acccess for unrolled matrix
     // (Batch, Row, Column)
-    #define in_unrolled_3d(i2, i1, i0) unrolled_input[(i2) * (Channel * Mask_size * Height_out * Width_out) + (i1) * (Height_out * Width_out) + i0]
+    #define in_unrolled_3d(i3, i2, i1, i0) unrolled_input[(i3) * (Height_out * Width_out * Channel * Mask_size) + (i2) * (BLOCK_SIZE * Channel * Mask_size) + (i1) * (BLOCK_SIZE) + i0]
     #define out_4d(i3, i2, i1, i0) output[(i3) * (Map_out * Height_out * Width_out) + (i2) * (Height_out * Width_out) + (i1) * (Width_out) + i0]
 
     // Insert your GPU convolution kernel code here
@@ -115,7 +115,7 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, fl
         for(int p = 0; p < K; p++) {
             for(int q = 0; q < K; q++) {
                 h_unroll = h_base + p * K + q;
-                in_unrolled_3d(nth_in, h_unroll, w_unroll) = in_4d(nth_in, channel, h_out + p, w_out + q); 
+                in_unrolled_3d(nth_in, blockIdx.x, h_unroll, tx) = in_4d(nth_in, channel, h_out + p, w_out + q); 
             }
         }
     }
@@ -125,8 +125,8 @@ __global__ void conv_forward_kernel_fusion(float *output, const float *input, fl
 
     // Matrix multiplicaiton
       if(thread_x < Channel * K * K * Height_out * Width_out) {
-        float *inputMat = (float *) &in_unrolled_3d(nth_in, 0, blockIdx.x * blockDim.x);
-        float *outputMat = (float *) &out_4d(nth_in, 0, blockIdx.y * blockDim.y, blockIdx.x * blockDim.x);
+        float *inputMat = (float *) &in_unrolled_3d(nth_in, blockIdx.x, 0, 0);
+        float *outputMat = (float *) &out_4d(nth_in, blockIdx.y * blockDim.y, 0, blockIdx.x * blockDim.x);
 
         int numARows = Map_out;
         int numAColumns = Channel * K * K;
