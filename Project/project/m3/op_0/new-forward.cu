@@ -132,8 +132,6 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     for(int i = 0; i < STREAM_COUNT; i++) {
         conv_forward_kernel<<<grid_dim, block_dim, 0, streams[i]>>>(device_outputs[i], device_inputs[i], device_mask, batch_size, Map_out, Channel, Height, Width, K, output_width_tiles);
     }
-
-    cudaDeviceSynchronize();
 }
 
 
@@ -143,6 +141,9 @@ __host__ void GPUInterface::conv_forward_gpu_epilog(float *host_output, float *d
     // Copy out result and destroy streams
     for(int i = 0; i < STREAM_COUNT; i++) {
         cudaMemcpyAsync(host_output + i*(output_size/sizeof(float)), device_outputs[i], output_size, cudaMemcpyDeviceToHost, streams[i]);
+    }
+
+    for(int i = 0; i < STREAM_COUNT; i++) {
         cudaStreamDestroy(streams[i]); 
     }
 
