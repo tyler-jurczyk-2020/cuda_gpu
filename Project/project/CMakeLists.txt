@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 11)
 project (ece408project)
 include(FindCUDA)
 # list( APPEND CUDA_NVCC_FLAGS "-gencode arch=compute_70,code=sm_70; -std=c++11; -lineinfo")
-list( APPEND CUDA_NVCC_FLAGS "; -std=c++11; -lineinfo")
+# list( APPEND CUDA_NVCC_FLAGS "; -std=c++11; -lineinfo")
+list( APPEND CUDA_NVCC_FLAGS "-gencode arch=compute_86,code=[sm_86,compute_86]; -std=c++11; -lineinfo")
 
 include_directories ("${PROJECT_SOURCE_DIR}/third_party/eigen")
 
