@@ -131,8 +131,6 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     size_t shared_mem = (shared_tile_mem + shared_mask_mem) * sizeof(float);
 
     conv_forward_kernel<<<grid_dim, block_dim, shared_mem>>>(device_output, device_input, device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
-
-    cudaDeviceSynchronize();
 }
 
 
