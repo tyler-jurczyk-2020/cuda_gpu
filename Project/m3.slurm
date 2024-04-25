@@ -2,7 +2,7 @@
 #SBATCH --job-name="Milestone3"
 #SBATCH --output="Milestone3.out"
 #SBATCH --error="Milestone3.err"
-#SBATCH --partition=gpuA40x4
+#SBATCH --partition=gpuA40x4-interactive
 #SBATCH --mem=12G
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
