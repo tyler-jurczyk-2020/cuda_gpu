@@ -8,8 +8,8 @@
 // OP_0 --> Using streams to overlap computation with data transfer
 
 static cudaStream_t streams [STREAM_COUNT];
-static float *device_inputs [STREAM_COUNT];
-static float *device_outputs [STREAM_COUNT];
+static float *local_device_input;
+static float *local_device_output;
 
 __global__ void conv_forward_kernel(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
 {
@@ -81,11 +81,12 @@ __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, co
     size_t output_size = ceil(1.0f*Batch/STREAM_COUNT) * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(float);
     size_t mask_size = Map_out * Channel * K * K * sizeof(float); 
 
+    cudaMallocHost(&local_device_input, input_size * STREAM_COUNT);
+    cudaMallocHost(&local_device_output, output_size * STREAM_COUNT);
+
     // Create streams
     for(int i = 0; i < STREAM_COUNT; i++) {
         cudaStreamCreate(streams + i);
-        cudaMallocHost(device_inputs + i, input_size);
-        cudaMallocHost(device_outputs + i, output_size);
     }
 
     cudaMalloc(device_mask_ptr, mask_size);
@@ -104,18 +105,10 @@ __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, co
 
     // Copy data over asynchronously
     for(int i = 0; i < STREAM_COUNT; i++) {
-        cudaMemcpyAsync(device_inputs[i], host_input + i*(input_size/sizeof(float)), input_size, cudaMemcpyHostToDevice, streams[i]);
+        cudaMemcpyAsync(local_device_input + i*(input_size/sizeof(float)), host_input + i*(input_size/sizeof(float)), input_size, cudaMemcpyHostToDevice, streams[i]);
+        conv_forward_kernel<<<grid_dim, block_dim, 0, streams[i]>>>(local_device_output + i*(output_size/sizeof(float)), local_device_input + i*(input_size/sizeof(float)), *device_mask_ptr, batch_size, Map_out, Channel, Height, Width, K, output_width_tiles);
+        cudaMemcpyAsync((void *) (host_output + i*(output_size/sizeof(float))), local_device_output + i*(output_size/sizeof(float)), output_size, cudaMemcpyDeviceToHost, streams[i]);
     }
-
-    for(int i = 0; i < STREAM_COUNT; i++) {
-        conv_forward_kernel<<<grid_dim, block_dim, 0, streams[i]>>>(device_outputs[i], device_inputs[i], *device_mask_ptr, batch_size, Map_out, Channel, Height, Width, K, output_width_tiles);
-    }
-
-    // Copy out result and destroy streams
-    for(int i = 0; i < STREAM_COUNT; i++) {
-        cudaMemcpyAsync((float *) host_output + i*(output_size/sizeof(float)), device_outputs[i], output_size, cudaMemcpyDeviceToHost, streams[i]);
-    }
-
     for(int i = 0; i < STREAM_COUNT; i++) {
         cudaStreamDestroy(streams[i]); 
     }
