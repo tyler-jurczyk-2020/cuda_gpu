@@ -67,20 +67,41 @@ __global__ void conv_forward_kernel(__half *output, const __half *input, const _
     #undef mask_4d
 }
 
+__host__ void convert2Half(__half *output, const float *input, int nmem) {
+    for(int i = 0; i < nmem; i++) {
+        output[i] = __float2half(input[i]);
+    }
+}
+
+__host__ void convert2Float(float *output, const __half *input, int nmem) {
+    for(int i = 0; i < nmem; i++) {
+        output[i] = __half2float(input[i]);
+    }
+}
 	
 __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, const float *host_input, const float *host_mask, float **device_output_ptr, float **device_input_ptr, float **device_mask_ptr, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
     // Allocate memory and copy over the relevant data structures to the GPU
-    *device_input_ptr = (float *) host_input;
-    *device_mask_ptr = (float *) host_mask;
-    *device_output_ptr = (float *) host_output;
-    /*
-    cudaMalloc(device_input_ptr, input_size);
-    cudaMalloc(device_mask_ptr, mask_size);
+    size_t half_input_size = Batch * Channel * Width * Height * sizeof(__half);
+    size_t half_output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(__half);
+    size_t half_mask_size = Map_out * Channel * K * K * sizeof(__half); 
+    cudaMalloc(device_input_ptr, half_input_size);
+    cudaMalloc(device_output_ptr, half_output_size);
+    cudaMalloc(device_mask_ptr, half_mask_size);
 
-    cudaMemcpy(*device_input_ptr, host_input, input_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(*device_mask_ptr, host_mask, mask_size, cudaMemcpyHostToDevice);
-    */
+    __half *temp_input;
+    __half *temp_mask;
+    temp_input = (__half *)malloc(half_input_size);
+    temp_mask = (__half *)malloc(half_mask_size);
+    convert2Half(temp_input, host_input, Batch * Channel * Width * Height);
+    convert2Half(temp_mask, host_mask, Map_out * Channel * K * K);
+
+    cudaMemcpy(*device_input_ptr, temp_input, half_input_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(*device_mask_ptr, temp_mask, half_mask_size, cudaMemcpyHostToDevice);
+
+    free(temp_input);
+    free(temp_mask);
+
     // We pass double pointers for you to initialize the relevant device pointers,
     //  which are passed to the other two functions.
 
@@ -93,42 +114,9 @@ __host__ void GPUInterface::conv_forward_gpu_prolog(const float *host_output, co
     // }
 }
 
-__host__ void convert2Half(__half *output, const float *input, int nmem) {
-    for(int i = 0; i < nmem; i++) {
-        output[i] = __float2half(input[i]);
-    }
-}
-
-__host__ void convert2Float(float *output, const __half *input, int nmem) {
-    for(int i = 0; i < nmem; i++) {
-        output[i] = __half2float(input[i]);
-    }
-}
 
 __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *device_input, const float *device_mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
-    __half *half_device_output;
-    __half *half_device_input;
-    __half *half_device_mask;
-
-    size_t half_input_size = Batch * Channel * Width * Height * sizeof(__half);
-    size_t half_output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(__half);
-    size_t half_mask_size = Map_out * Channel * K * K * sizeof(__half); 
-    cudaMalloc(&half_device_input, half_input_size);
-    cudaMalloc(&half_device_output, half_output_size);
-    cudaMalloc(&half_device_mask, half_mask_size);
-
-    __half *temp_input;
-    __half *temp_mask;
-    __half *temp_output;
-    temp_input = (half *)malloc(half_input_size);
-    temp_mask = (half *)malloc(half_mask_size);
-    convert2Half(temp_input, device_input, Batch * Channel * Width * Height);
-    convert2Half(temp_mask, device_mask, Map_out * Channel * K * K);
-
-    cudaMemcpy(half_device_input, temp_input, half_input_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(half_device_mask, temp_mask, half_mask_size, cudaMemcpyHostToDevice);
-
     // Set the kernel dimensions and call the kernel
     int output_width = Width - K + 1;
     int output_height = Height - K + 1;
@@ -139,29 +127,24 @@ __host__ void GPUInterface::conv_forward_gpu(float *device_output, const float *
     dim3 grid_dim(output_width_tiles * output_height_tiles, Map_out, Batch);
     dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE, 1);
 
-    conv_forward_kernel<<<grid_dim, block_dim>>>(half_device_output, half_device_input, half_device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
-
-    cudaDeviceSynchronize();
-
-    temp_output = (__half *)malloc(half_output_size);
-    cudaMemcpy(temp_output, half_device_output, half_output_size, cudaMemcpyDeviceToHost);
-    
-    convert2Float(device_output, temp_output, Batch * Map_out * (Width - K + 1) * (Height - K + 1));
-
-    cudaFree(half_device_input);
-    cudaFree(half_device_mask);
-    free(temp_input);
-    free(temp_mask);
-    free(temp_output);
+    conv_forward_kernel<<<grid_dim, block_dim>>>((__half *) device_output, (__half *) device_input, (__half *) device_mask, Batch, Map_out, Channel, Height, Width, K, output_width_tiles);
 }
 
 
 __host__ void GPUInterface::conv_forward_gpu_epilog(float *host_output, float *device_output, float *device_input, float *device_mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K)
 {
+    size_t half_output_size = Batch * Map_out * (Width - K + 1) * (Height - K + 1) * sizeof(__half);
+    __half *temp_output;
+    temp_output = (__half *)malloc(half_output_size);
+    cudaMemcpy(temp_output, device_output, half_output_size, cudaMemcpyDeviceToHost);
+    
+    convert2Float(host_output, temp_output, Batch * Map_out * (Width - K + 1) * (Height - K + 1));
+
+    free(temp_output);
     // Free device memory
-    free(device_input);
+    cudaFree(device_input);
     cudaFree(device_output);
-    free(device_mask);
+    cudaFree(device_mask);
 }
 
 
