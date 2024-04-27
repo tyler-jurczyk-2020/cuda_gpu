@@ -4,7 +4,7 @@
 #include "gpu-new-forward.h"
 #include <cuda_fp16.h>
 
-#define BLOCK_SIZE 20
+#define BLOCK_SIZE 32
 
 __global__ void conv_forward_kernel(__half *output, const __half *input, const __half *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int out_grid_width)
 {
