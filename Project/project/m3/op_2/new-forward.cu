@@ -38,7 +38,6 @@ __global__ void conv_forward_kernel_unroll(float *output, const float *input, co
     // An example use of these macros:
     // float a = in_4d(0,0,0,0)
     // out_4d(0,0,0,0) = a
-    const int Mask_size = K * K;
 
     // Access input as normal
     #define in_4d(i3, i2, i1, i0) input[(i3) * (Channel * Height * Width) + (i2) * (Height * Width) + (i1) * (Width) + i0]
@@ -122,8 +121,6 @@ __device__ void matrixMultiplyShared(float *A, float *B, float *C,
 // Compute C = A * B
 __global__ void conv_forward_kernel_matmul(float *output, const float *input, const float *mask, const int Batch, const int Map_out, const int Channel, const int Height, const int Width, const int K, const int num_image)
 {
-  const int Mask_size = K * K;
-
   #define out_4d(i3, i2, i1, i0) output[(i3) * (Map_out * Height_out * Width_out) + (i2) * (Height_out * Width_out) + (i1) * (Width_out) + i0]
   #define in_unrolled_2d(i1, i0) input[(i1) * (Height_out * Width_out) + i0]
 
