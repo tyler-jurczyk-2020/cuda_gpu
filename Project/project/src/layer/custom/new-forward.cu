@@ -1,1 +1,1 @@
-/u/tjurczyk/ece408/Project/project/m3/op_10/new-forward.cu
+/u/tjurczyk/ece408/Project/project/m3/op_6/new-forward.cu
