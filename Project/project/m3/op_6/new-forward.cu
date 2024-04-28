@@ -2,8 +2,8 @@
 #include <iostream>
 #include "gpu-new-forward.h"
 
-#define BLOCK_SIZE 16
-#define TILE_WIDTH 16
+#define BLOCK_SIZE 20
+#define TILE_WIDTH 20
 
 // OP_2 --> Base Input Matrix Unrolling & Tile Matrix Multiplication 
 
